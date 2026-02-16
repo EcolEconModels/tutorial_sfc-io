@@ -47,3 +47,22 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# ---------------------------
+# tutorial_sfc-io generated outputs
+# ---------------------------
+# Quarto rendered artifacts
+tutorial_sfc-io-notebook.html
+tutorial_sfc-io-slides.html
+tutorial_sfc-io.html
+tutorial_sfc-io_files/
+
+# Design doc rendered artifacts
+design.html
+design_files/
+
+# Generated code artifacts (single-source workflow from .qmd)
+tutorial_sfc-io.R
+tutorial_sfc-io.py
+tutorial_sfc-io_step*.R
+tutorial_sfc-io_step*.py

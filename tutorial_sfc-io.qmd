@@ -1,0 +1,530 @@
+---
+title: "Minimal SFC-IO Tutorial"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+This `.qmd` is the single source of truth.
+
+- Generate standalone script: `Rscript build_tutorial.R --purl-only`
+- Render notebook html: `Rscript build_tutorial.R`
+- Render notebook + slides: `Rscript build_tutorial.R --reveal`
+
+## Setup and Data
+
+```{r helpers}
+as_numeric_clean <- function(x) {
+  y <- gsub(",", "", as.character(x), fixed = TRUE)
+  y <- gsub(" ", "", y, fixed = TRUE)
+  y <- gsub("[^0-9eE+\\-\\.]", "", y)
+  suppressWarnings(as.numeric(y))
+}
+
+safe_div <- function(num, den, default = 0) {
+  out <- rep(default, length(num))
+  ok <- is.finite(num) & is.finite(den) & den != 0
+  out[ok] <- num[ok] / den[ok]
+  out
+}
+
+check_setup <- function() {
+  required_packages <- c("readxl", "ggplot2")
+  missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(missing_packages) > 0) {
+    stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+  }
+
+  required_files <- c("IOT_AT_2021_TOTAL_energy_green_brown.xlsx", "wealth_assets.xlsx")
+  missing_files <- required_files[!file.exists(required_files)]
+  if (length(missing_files) > 0) {
+    stop("Missing data file(s): ", paste(missing_files, collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+load_data <- function(base_year = 2021) {
+  check_setup()
+
+  io <- as.data.frame(readxl::read_xlsx(
+    "IOT_AT_2021_TOTAL_energy_green_brown.xlsx",
+    sheet = "Sheet 1",
+    range = "A11:CE95",
+    col_names = TRUE
+  ))
+
+  wealth <- readxl::read_xlsx(
+    "wealth_assets.xlsx",
+    sheet = "nasa_10_f_bs",
+    range = "A10:M19",
+    col_names = TRUE
+  )
+
+  label_col <- "PRD_USE (Labels)"
+  if (!(label_col %in% names(io))) stop("Missing PRD_USE labels in IO.", call. = FALSE)
+
+  sector_labels <- as.character(io[[label_col]][2:66])
+  if (length(sector_labels) != 65) stop("Expected 65 sectors.", call. = FALSE)
+
+  co2_sheet <- tail(readxl::excel_sheets("IOT_AT_2021_TOTAL_energy_green_brown.xlsx"), 1)
+  co2_tbl <- readxl::read_xlsx(
+    "IOT_AT_2021_TOTAL_energy_green_brown.xlsx",
+    sheet = co2_sheet,
+    col_names = TRUE
+  )
+  co2_match <- match(sector_labels, as.character(co2_tbl[["To Sector"]]))
+  if (any(is.na(co2_match))) stop("Missing CO2 intensities for some sectors.", call. = FALSE)
+
+  list(
+    base_year = base_year,
+    io = io,
+    wealth = wealth,
+    sector_labels = sector_labels,
+    co2_tbl = co2_tbl,
+    co2_match = co2_match
+  )
+}
+
+calibrate_base <- function(data) {
+  io <- data$io
+  wealth <- data$wealth
+  n <- 65
+
+  Z <- matrix(as_numeric_clean(unlist(io[2:66, 3:67])), nrow = n, ncol = n)
+  q_s <- as_numeric_clean(io[84, 3:67])
+  q_s[!is.finite(q_s) | q_s <= 0] <- 1e-9
+
+  A <- sweep(Z, 2, q_s, "/")
+  A[!is.finite(A)] <- 0
+  L <- solve(diag(n) - A)
+
+  C_i0 <- as_numeric_clean(io[2:66, "Final consumption expenditure by households"]) +
+    as_numeric_clean(io[2:66, "Final consumption expenditure by non-profit organisations serving households (NPISH)"])
+  G_i0 <- as_numeric_clean(io[2:66, "Final consumption expenditure by government"])
+  I_i0 <- as_numeric_clean(io[2:66, "Gross capital formation...72"])
+  EX_i0 <- as_numeric_clean(io[2:66, "Exports of goods and services"])
+  X_i0 <- as_numeric_clean(io[2:66, "Total use"])
+
+  C0 <- sum(C_i0)
+  G0 <- sum(G_i0)
+
+  beta_C <- safe_div(C_i0, rep(C0, n))
+  beta_G <- safe_div(G_i0, rep(G0, n))
+  beta_C <- beta_C / sum(beta_C)
+  beta_G <- beta_G / sum(beta_G)
+
+  imports_row <- which(io[["PRD_USE (Labels)"]] == "Imports of goods and services")
+  imports_i <- as_numeric_clean(io[imports_row, 3:67])
+  m_i <- pmin(pmax(safe_div(imports_i, X_i0), 0), 0.95)
+
+  va_row <- which(io[["PRD_USE (Labels)"]] == "Value added, gross")
+  va_i <- as_numeric_clean(io[va_row, 3:67])
+  va_coeff <- safe_div(va_i, q_s)
+  va_coeff[!is.finite(va_coeff) | va_coeff < 0] <- 0
+
+  Y0 <- sum(va_coeff * X_i0)
+  tau_y <- (as_numeric_clean(io[73, "Total use"]) + as_numeric_clean(io[74, "Total use"])) / Y0
+  tau_y <- ifelse(is.finite(tau_y), pmin(pmax(tau_y, 0), 0.6), 0.2)
+
+  w_assets_col <- names(wealth)[2]
+  w_liab_col <- names(wealth)[3]
+  hh_row <- which(wealth[["NA_ITEM (Labels)"]] == "Households")
+  npish_row <- which(grepl("^Non-profit institutions", wealth[["NA_ITEM (Labels)"]]))
+  gov_row <- which(wealth[["NA_ITEM (Labels)"]] == "General government")
+
+  hh_assets <- as_numeric_clean(wealth[hh_row, w_assets_col])
+  hh_liab <- as_numeric_clean(wealth[hh_row, w_liab_col])
+  npish_assets <- if (length(npish_row) == 1) as_numeric_clean(wealth[npish_row, w_assets_col]) else 0
+  npish_liab <- if (length(npish_row) == 1) as_numeric_clean(wealth[npish_row, w_liab_col]) else 0
+
+  V0 <- (hh_assets - hh_liab) + (npish_assets - npish_liab)
+  B0 <- as_numeric_clean(wealth[gov_row, w_liab_col])
+
+  s_prod <- as_numeric_clean(data$co2_tbl[["Mean CO2 intensity (kg/M€)"]][data$co2_match])
+  s_prod[!is.finite(s_prod)] <- 0
+
+  list(
+    base_year = data$base_year,
+    n = n,
+    sector_labels = data$sector_labels,
+    L = L,
+    va_coeff = va_coeff,
+    beta_C = beta_C,
+    beta_G = beta_G,
+    m_i = m_i,
+    I_i0 = I_i0,
+    EX_i0 = EX_i0,
+    tau_y = tau_y,
+    V0 = V0,
+    B0 = B0,
+    G0 = G0,
+    s_prod = s_prod,
+    idx_brown = match("Energy Brown", data$sector_labels),
+    idx_green = match("Energy Green", data$sector_labels)
+  )
+}
+```
+
+```{r load-and-calibrate}
+check_setup()
+data_obj <- load_data(2021)
+calib <- calibrate_base(data_obj)
+
+data.frame(
+  metric = c("Sectors", "tau_y", "G0", "V0", "B0"),
+  value = c(calib$n, calib$tau_y, calib$G0, calib$V0, calib$B0)
+)
+```
+
+## Step 1: Simplest Model (Closed SFC-IO)
+
+```{r step1-function}
+simulate_step1_closed <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01) {
+  n <- calib$n
+  years <- calib$base_year + seq_len(T) - 1
+
+  out <- data.frame(
+    year = years,
+    GDP = numeric(T), TAX = numeric(T), YD = numeric(T),
+    C = numeric(T), G = numeric(T), V = numeric(T),
+    DEF = numeric(T), B = numeric(T)
+  )
+  x_mat <- matrix(0, nrow = T, ncol = n)
+
+  V_prev <- calib$V0
+  B_prev <- calib$B0
+  G_prev <- calib$G0
+
+  k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% calib$beta_C))
+
+  for (t in seq_len(T)) {
+    G_t <- if (t == 1) calib$G0 else G_prev * (1 + g_G)
+
+    other_fd <- calib$beta_G * G_t + calib$I_i0
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% other_fd))
+
+    den <- 1 - c_y * (1 - calib$tau_y) * k
+    C_t <- (c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den
+    C_t <- max(C_t, 0)
+
+    fd_i <- calib$beta_C * C_t + other_fd
+    x_t <- as.numeric(calib$L %*% fd_i)
+    Y_t <- sum(calib$va_coeff * x_t)
+
+    TAX_t <- calib$tau_y * Y_t
+    YD_t <- Y_t - TAX_t
+
+    V_t <- V_prev + YD_t - C_t
+    DEF_t <- G_t - TAX_t
+    B_t <- B_prev + DEF_t
+
+    out[t, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B")] <- c(Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t)
+    x_mat[t, ] <- x_t
+
+    V_prev <- V_t
+    B_prev <- B_t
+    G_prev <- G_t
+  }
+
+  list(aggregate = out, x = x_mat)
+}
+```
+
+```{r step1-run}
+step1 <- simulate_step1_closed(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01)
+head(step1$aggregate)
+```
+
+```{r step1-plot, fig.height=4, fig.width=7}
+ggplot2::ggplot(step1$aggregate, ggplot2::aes(year, GDP)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 1: GDP (closed model)", y = "M EUR") +
+  ggplot2::theme_minimal()
+```
+
+## Step 2: Add RoW (Imports and Exports)
+
+```{r step2-function}
+simulate_step2_open <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01, ex_growth = 0) {
+  n <- calib$n
+  years <- calib$base_year + seq_len(T) - 1
+  S <- 1 - calib$m_i
+
+  out <- data.frame(
+    year = years,
+    GDP = numeric(T), TAX = numeric(T), YD = numeric(T),
+    C = numeric(T), G = numeric(T), V = numeric(T),
+    DEF = numeric(T), B = numeric(T),
+    EX = numeric(T), IM = numeric(T), TB = numeric(T)
+  )
+  x_mat <- matrix(0, nrow = T, ncol = n)
+
+  V_prev <- calib$V0
+  B_prev <- calib$B0
+  G_prev <- calib$G0
+
+  k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * calib$beta_C)))
+
+  for (t in seq_len(T)) {
+    G_t <- if (t == 1) calib$G0 else G_prev * (1 + g_G)
+    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(t - 1)
+
+    other_fd <- calib$beta_G * G_t + calib$I_i0 + EX_i_t
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * other_fd)))
+
+    den <- 1 - c_y * (1 - calib$tau_y) * k
+    C_t <- (c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den
+    C_t <- max(C_t, 0)
+
+    fd_dom_i <- calib$beta_C * C_t + other_fd
+    im_i <- calib$m_i * fd_dom_i
+    fd_net_i <- pmax(fd_dom_i - im_i, 0)
+
+    x_t <- as.numeric(calib$L %*% fd_net_i)
+    Y_t <- sum(calib$va_coeff * x_t)
+
+    TAX_t <- calib$tau_y * Y_t
+    YD_t <- Y_t - TAX_t
+
+    V_t <- V_prev + YD_t - C_t
+    DEF_t <- G_t - TAX_t
+    B_t <- B_prev + DEF_t
+
+    EX_t <- sum(EX_i_t)
+    IM_t <- sum(im_i)
+    TB_t <- EX_t - IM_t
+
+    out[t, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B", "EX", "IM", "TB")] <-
+      c(Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t, EX_t, IM_t, TB_t)
+
+    x_mat[t, ] <- x_t
+
+    V_prev <- V_t
+    B_prev <- B_t
+    G_prev <- G_t
+  }
+
+  list(aggregate = out, x = x_mat)
+}
+
+run_step2_scenarios <- function(calib, T = 20) {
+  specs <- list(
+    baseline = list(g_G = 0.01, c_y = 0.85, c_v = 0.02, ex_growth = 0),
+    fiscal_expansion = list(g_G = 0.03, c_y = 0.85, c_v = 0.02, ex_growth = 0),
+    high_wealth_consumption = list(g_G = 0.01, c_y = 0.85, c_v = 0.06, ex_growth = 0)
+  )
+
+  res <- lapply(names(specs), function(nm) {
+    sp <- specs[[nm]]
+    sim <- simulate_step2_open(calib, T = T, c_y = sp$c_y, c_v = sp$c_v, g_G = sp$g_G, ex_growth = sp$ex_growth)
+    sim$aggregate$scenario <- nm
+    sim
+  })
+  names(res) <- names(specs)
+
+  agg <- do.call(rbind, lapply(res, function(x) x$aggregate))
+  rownames(agg) <- NULL
+  list(by_scenario = res, aggregate = agg)
+}
+```
+
+```{r step2-run}
+step2 <- run_step2_scenarios(calib, T = 20)
+head(step2$aggregate)
+```
+
+```{r step2-plots, fig.height=4, fig.width=7}
+p1 <- ggplot2::ggplot(step2$aggregate, ggplot2::aes(year, GDP, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) + ggplot2::theme_minimal() +
+  ggplot2::labs(title = "Step 2: GDP with RoW")
+
+p2 <- ggplot2::ggplot(step2$aggregate, ggplot2::aes(year, TB, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) + ggplot2::theme_minimal() +
+  ggplot2::labs(title = "Step 2: Trade balance")
+
+print(p1)
+print(p2)
+```
+
+## Step 3: Steady-State Play (scan `c_v`)
+
+```{r step3-function}
+steady_state_play <- function(calib, cv_grid = seq(0, 0.12, by = 0.01), target_window = 5) {
+  out <- data.frame(c_v = cv_grid, avg_gdp_growth_last_window = NA_real_)
+
+  for (i in seq_along(cv_grid)) {
+    sim <- simulate_step2_open(calib, T = 20, c_y = 0.85, c_v = cv_grid[i], g_G = 0.01, ex_growth = 0)
+    gdp <- sim$aggregate$GDP
+    growth <- c(NA_real_, gdp[-1] / gdp[-length(gdp)] - 1)
+    out$avg_gdp_growth_last_window[i] <- mean(tail(growth[is.finite(growth)], target_window))
+  }
+
+  best <- out[which.min(abs(out$avg_gdp_growth_last_window)), , drop = FALSE]
+  list(grid = out, best = best)
+}
+```
+
+```{r step3-run}
+step3 <- steady_state_play(calib, cv_grid = seq(0, 0.12, by = 0.01), target_window = 5)
+step3$grid
+```
+
+```{r step3-best}
+step3$best
+```
+
+## Step 4: Add CO2 (from sector output)
+
+```{r step4-function}
+add_co2 <- function(sim_out, calib) {
+  co2 <- rowSums(sim_out$x * matrix(rep(calib$s_prod, each = nrow(sim_out$x)), nrow = nrow(sim_out$x))) / 1e9
+  out <- sim_out$aggregate
+  out$CO2_Mt <- co2
+  out
+}
+
+add_co2_to_step2 <- function(step2_out, calib) {
+  agg_list <- lapply(step2_out$by_scenario, function(sim) {
+    out <- add_co2(sim, calib)
+    out$scenario <- unique(sim$aggregate$scenario)
+    out
+  })
+  agg <- do.call(rbind, agg_list)
+  rownames(agg) <- NULL
+  agg
+}
+```
+
+```{r step4-run}
+step4_agg <- add_co2_to_step2(step2, calib)
+head(step4_agg)
+```
+
+```{r step4-plot, fig.height=4, fig.width=7}
+ggplot2::ggplot(step4_agg, ggplot2::aes(year, CO2_Mt, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 4: CO2 emissions", y = "Mt CO2") +
+  ggplot2::theme_minimal()
+```
+
+## Step 5: Add Transition (shift brown to green demand)
+
+```{r step5-function}
+simulate_step5_transition <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01,
+                                      ex_growth = 0, annual_shift = 0.002, enabled = TRUE) {
+  n <- calib$n
+  years <- calib$base_year + seq_len(T) - 1
+  S <- 1 - calib$m_i
+
+  out <- data.frame(
+    year = years,
+    GDP = numeric(T), C = numeric(T), G = numeric(T),
+    V = numeric(T), B = numeric(T), TB = numeric(T), CO2_Mt = numeric(T),
+    betaC_brown = numeric(T), betaC_green = numeric(T)
+  )
+
+  V_prev <- calib$V0
+  B_prev <- calib$B0
+  G_prev <- calib$G0
+
+  beta_C0 <- calib$beta_C
+  beta_G0 <- calib$beta_G
+
+  x_mat <- matrix(0, nrow = T, ncol = n)
+
+  for (t in seq_len(T)) {
+    G_t <- if (t == 1) calib$G0 else G_prev * (1 + g_G)
+    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(t - 1)
+
+    beta_C_t <- beta_C0
+    beta_G_t <- beta_G0
+
+    if (enabled && is.finite(calib$idx_brown) && is.finite(calib$idx_green)) {
+      shift <- (t - 1) * annual_shift
+      shift_C <- min(shift, max(0, beta_C0[calib$idx_brown] - 1e-8))
+      shift_G <- min(shift, max(0, beta_G0[calib$idx_brown] - 1e-8))
+
+      beta_C_t[calib$idx_brown] <- beta_C0[calib$idx_brown] - shift_C
+      beta_C_t[calib$idx_green] <- beta_C0[calib$idx_green] + shift_C
+
+      beta_G_t[calib$idx_brown] <- beta_G0[calib$idx_brown] - shift_G
+      beta_G_t[calib$idx_green] <- beta_G0[calib$idx_green] + shift_G
+    }
+
+    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * beta_C_t)))
+    other_fd <- beta_G_t * G_t + calib$I_i0 + EX_i_t
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * other_fd)))
+
+    den <- 1 - c_y * (1 - calib$tau_y) * k
+    C_t <- (c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den
+    C_t <- max(C_t, 0)
+
+    fd_dom_i <- beta_C_t * C_t + other_fd
+    im_i <- calib$m_i * fd_dom_i
+    fd_net_i <- pmax(fd_dom_i - im_i, 0)
+
+    x_t <- as.numeric(calib$L %*% fd_net_i)
+    Y_t <- sum(calib$va_coeff * x_t)
+    T_t <- calib$tau_y * Y_t
+    YD_t <- Y_t - T_t
+
+    V_t <- V_prev + YD_t - C_t
+    B_t <- B_prev + (G_t - T_t)
+
+    TB_t <- sum(EX_i_t) - sum(im_i)
+    CO2_t <- sum(calib$s_prod * x_t) / 1e9
+
+    out[t, c("GDP", "C", "G", "V", "B", "TB", "CO2_Mt", "betaC_brown", "betaC_green")] <-
+      c(Y_t, C_t, G_t, V_t, B_t, TB_t, CO2_t,
+        if (is.finite(calib$idx_brown)) beta_C_t[calib$idx_brown] else NA_real_,
+        if (is.finite(calib$idx_green)) beta_C_t[calib$idx_green] else NA_real_)
+
+    x_mat[t, ] <- x_t
+
+    V_prev <- V_t
+    B_prev <- B_t
+    G_prev <- G_t
+  }
+
+  list(aggregate = out, x = x_mat)
+}
+```
+
+```{r step5-run}
+baseline_open <- simulate_step5_transition(calib, T = 20, enabled = FALSE)
+green_transition <- simulate_step5_transition(calib, T = 20, enabled = TRUE, annual_shift = 0.002)
+
+compare <- data.frame(
+  year = baseline_open$aggregate$year,
+  CO2_baseline = baseline_open$aggregate$CO2_Mt,
+  CO2_transition = green_transition$aggregate$CO2_Mt,
+  brown_share_baseline = baseline_open$aggregate$betaC_brown,
+  brown_share_transition = green_transition$aggregate$betaC_brown
+)
+
+head(compare)
+```
+
+```{r step5-plot, fig.height=4, fig.width=7}
+ggplot2::ggplot(compare, ggplot2::aes(year)) +
+  ggplot2::geom_line(ggplot2::aes(y = CO2_baseline, color = "baseline"), linewidth = 1) +
+  ggplot2::geom_line(ggplot2::aes(y = CO2_transition, color = "transition"), linewidth = 1) +
+  ggplot2::labs(title = "Step 5: CO2 baseline vs transition", y = "Mt CO2", color = "Scenario") +
+  ggplot2::theme_minimal()
+```
+
+## Final Snapshot
+
+```{r final-snapshot}
+last_year <- max(step4_agg$year)
+summary_final <- step4_agg[step4_agg$year == last_year, c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
+summary_final <- summary_final[order(summary_final$scenario), ]
+rownames(summary_final) <- NULL
+summary_final
+```
