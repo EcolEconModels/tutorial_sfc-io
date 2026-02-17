@@ -54,7 +54,7 @@ core_config <- list(
   wealth_finpos = "LIAB",
   emissions_airpol = "CO2",
   emissions_unit = "THS_T",
-  cache_dir = "data_cache",
+  cache_dir = "data",
   enforce_co2_consistency = FALSE
 )
 
@@ -71,9 +71,197 @@ emissions_config <- list(
   wealth_finpos = "LIAB",
   emissions_airpol = Sys.getenv("SFC_EMIS_AIRPOL", "CO2"),
   emissions_unit = "THS_T",
-  cache_dir = "data_cache",
+  cache_dir = "data",
   enforce_co2_consistency = TRUE
 )
+
+```
+
+## Step 1: SIM Closed Model (Lag and Current)
+
+### Objective
+
+Implement the textbook SIM core in closed economy form and compare:
+
+-   `SIM-lag`: behavior depends on lagged disposable income.
+-   `SIM-current`: current disposable income solved each period by fixed-point iteration.
+-   Analytic steady-state benchmark `Y* = G / theta`.
+
+### SIM Balance Sheet (minimal)
+
+| Sector     | Government Bills | Net Worth |
+|------------|-----------------:|----------:|
+| Households |               +H |        +V |
+| Government |               -B |        -B |
+| Sum        |                0 |         0 |
+
+### SIM Transactions-Flow Matrix (minimal)
+
+| Flow                | Households | Government | Sum |
+|---------------------|-----------:|-----------:|----:|
+| Consumption         |         -C |         +C |   0 |
+| Government spending |         +G |         -G |   0 |
+| Taxes               |         -T |         +T |   0 |
+| Change in bills     |        +dH |        -dB |   0 |
+| Sum                 |          0 |          0 |   0 |
+
+### Equations
+
+-   `Y_t = C_t + G`
+-   `T_t = theta * Y_t`
+-   `YD_t = Y_t - T_t`
+-   `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}`
+-   `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` (solved by fixed point each period)
+-   `H_t = H_{t-1} + YD_t - C_t`
+-   Steady state: `Y* = G / theta`
+
+### What Changed from Shared Setup
+
+Added only the macro behavioral block (no IOT yet).
+
+```{r step1_functions}
+sim_steady_state <- function(G, theta, alpha1, alpha2) {
+  Y_star <- G / theta
+  H_star <- ((1 - alpha1) * (1 - theta) / alpha2) * Y_star
+  list(Y_star = Y_star, H_star = H_star)
+}
+
+simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
+                             Y0 = 80, H0 = 300) {
+  out <- data.frame(
+    t = seq_len(T),
+    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_
+  )
+
+  YD_prev <- (1 - theta) * Y0
+  H_prev <- H0
+
+  for (tt in seq_len(T)) {
+    C_t <- alpha1 * YD_prev + alpha2 * H_prev
+    Y_t <- C_t + G
+    T_t <- theta * Y_t
+    YD_t <- Y_t - T_t
+    H_t <- H_prev + YD_t - C_t
+
+    out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
+
+    YD_prev <- YD_t
+    H_prev <- H_t
+  }
+
+  out
+}
+
+simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
+                                    Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
+  out <- data.frame(
+    t = seq_len(T),
+    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_,
+    fp_iters = NA_integer_
+  )
+
+  H_prev <- H0
+  Y_prev <- Y0
+
+  for (tt in seq_len(T)) {
+    Y_guess <- Y_prev
+    n_iter <- 0L
+
+    repeat {
+      n_iter <- n_iter + 1L
+      Y_new <- G + alpha1 * (1 - theta) * Y_guess + alpha2 * H_prev
+      if (abs(Y_new - Y_guess) < fp_tol || n_iter >= fp_max) break
+      Y_guess <- Y_new
+    }
+
+    Y_t <- Y_new
+    T_t <- theta * Y_t
+    YD_t <- Y_t - T_t
+    C_t <- Y_t - G
+    H_t <- H_prev + YD_t - C_t
+
+    out[tt, c("Y", "T_tax", "YD", "C", "H", "fp_iters")] <- c(Y_t, T_t, YD_t, C_t, H_t, n_iter)
+
+    H_prev <- H_t
+    Y_prev <- Y_t
+  }
+
+  out
+}
+```
+
+```{r step1_run}
+T_h <- 20
+pars <- list(G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2)
+ss <- sim_steady_state(pars$G, pars$theta, pars$alpha1, pars$alpha2)
+
+Y0_low <- 0.7 * ss$Y_star
+Y0_high <- 1.3 * ss$Y_star
+
+H0_from_Y <- function(Y0, G, theta, alpha1, alpha2) {
+  (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
+}
+
+H0_low <- H0_from_Y(Y0_low, pars$G, pars$theta, pars$alpha1, pars$alpha2)
+H0_high <- H0_from_Y(Y0_high, pars$G, pars$theta, pars$alpha1, pars$alpha2)
+
+lag_low <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                            Y0 = Y0_low, H0 = H0_low)
+lag_high <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                             Y0 = Y0_high, H0 = H0_high)
+cur_low <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                                   Y0 = Y0_low, H0 = H0_low)
+cur_high <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                                    Y0 = Y0_high, H0 = H0_high)
+
+step1_paths <- rbind(
+  data.frame(t = lag_low$t, Y = lag_low$Y, path = "SIM-lag (low start)"),
+  data.frame(t = lag_high$t, Y = lag_high$Y, path = "SIM-lag (high start)"),
+  data.frame(t = cur_low$t, Y = cur_low$Y, path = "SIM-current (low start)"),
+  data.frame(t = cur_high$t, Y = cur_high$Y, path = "SIM-current (high start)")
+)
+
+step1_paths$year <- core_config$year + step1_paths$t - 1
+
+tail(step1_paths)
+```
+
+```{r step1_plot, fig.height=4, fig.width=7}
+ggplot2::ggplot(step1_paths, ggplot2::aes(year, Y, color = path)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::geom_hline(yintercept = ss$Y_star, linetype = "dashed", linewidth = 0.8) +
+  ggplot2::labs(
+    title = "Step 1: SIM-lag and SIM-current converge to analytic fixed point",
+    y = "GDP",
+    color = "Simulation"
+  ) +
+  ggplot2::theme_minimal()
+```
+
+### Interpretation
+
+Both dynamic variants converge asymptotically to the same fixed point. At the fixed point, lagged/current timing no longer matters.
+
+## Step 2: SIOT 2020 and Exogenous Energy Transition with Closure Options
+
+### Objective
+
+Load SIOT for the core configuration (default: Austria 2020, product-by-product, TOTAL; cache-first from Eurostat API) and simulate an exogenous 20-year energy transition using closure options from `closure_utils.R`.
+
+### Equations
+
+-   Output identity: `x_t = (I - A_t)^(-1) * f_t`
+-   Closure growth map (from `closure_utils.R`):
+    -   `g_R`, `g_N`, `g_O` depend on selected closure.
+-   Policy targets for energy sectors (exogenous in this step):
+    -   `eps_green`, `eps_brown`
+
+### What Changed from Step 1
+
+Added sectoral production block and closure logic. Household/government behavior is still not endogenized here.
+
+```{r step2_functions}
+source("closure_utils.R")
 
 validate_tutorial_config <- function(cfg) {
   valid_scope <- c("TOTAL", "DOM")
@@ -111,7 +299,7 @@ safe_div <- function(num, den, default = 0) {
   out
 }
 
-ensure_cache_dir <- function(cache_dir = "data_cache") {
+ensure_cache_dir <- function(cache_dir = "data") {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
   cache_dir
 }
@@ -131,7 +319,7 @@ cache_file_for_query <- function(dataset_id, params, cache_dir) {
   file.path(cache_dir, paste0(dataset_id, '__', sanitize_for_filename(key), '.json'))
 }
 
-fetch_eurostat_json <- function(dataset_id, params, cache_dir = 'data_cache') {
+fetch_eurostat_json <- function(dataset_id, params, cache_dir = 'data') {
   cache_dir <- ensure_cache_dir(cache_dir)
   cache_file <- cache_file_for_query(dataset_id, params, cache_dir)
 
@@ -544,193 +732,7 @@ find_energy_indices <- function(sector_codes, sector_labels) {
 
   list(idx_green = idx_green, idx_brown = idx_brown)
 }
-```
 
-## Step 1: SIM Closed Model (Lag and Current)
-
-### Objective
-
-Implement the textbook SIM core in closed economy form and compare:
-
--   `SIM-lag`: behavior depends on lagged disposable income.
--   `SIM-current`: current disposable income solved each period by fixed-point iteration.
--   Analytic steady-state benchmark `Y* = G / theta`.
-
-### SIM Balance Sheet (minimal)
-
-| Sector     | Government Bills | Net Worth |
-|------------|-----------------:|----------:|
-| Households |               +H |        +V |
-| Government |               -B |        -B |
-| Sum        |                0 |         0 |
-
-### SIM Transactions-Flow Matrix (minimal)
-
-| Flow                | Households | Government | Sum |
-|---------------------|-----------:|-----------:|----:|
-| Consumption         |         -C |         +C |   0 |
-| Government spending |         +G |         -G |   0 |
-| Taxes               |         -T |         +T |   0 |
-| Change in bills     |        +dH |        -dB |   0 |
-| Sum                 |          0 |          0 |   0 |
-
-### Equations
-
--   `Y_t = C_t + G`
--   `T_t = theta * Y_t`
--   `YD_t = Y_t - T_t`
--   `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}`
--   `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` (solved by fixed point each period)
--   `H_t = H_{t-1} + YD_t - C_t`
--   Steady state: `Y* = G / theta`
-
-### What Changed from Shared Setup
-
-Added only the macro behavioral block (no IOT yet).
-
-```{r step1_functions}
-sim_steady_state <- function(G, theta, alpha1, alpha2) {
-  Y_star <- G / theta
-  H_star <- ((1 - alpha1) * (1 - theta) / alpha2) * Y_star
-  list(Y_star = Y_star, H_star = H_star)
-}
-
-simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
-                             Y0 = 80, H0 = 300) {
-  out <- data.frame(
-    t = seq_len(T),
-    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_
-  )
-
-  YD_prev <- (1 - theta) * Y0
-  H_prev <- H0
-
-  for (tt in seq_len(T)) {
-    C_t <- alpha1 * YD_prev + alpha2 * H_prev
-    Y_t <- C_t + G
-    T_t <- theta * Y_t
-    YD_t <- Y_t - T_t
-    H_t <- H_prev + YD_t - C_t
-
-    out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
-
-    YD_prev <- YD_t
-    H_prev <- H_t
-  }
-
-  out
-}
-
-simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
-                                    Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
-  out <- data.frame(
-    t = seq_len(T),
-    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_,
-    fp_iters = NA_integer_
-  )
-
-  H_prev <- H0
-  Y_prev <- Y0
-
-  for (tt in seq_len(T)) {
-    Y_guess <- Y_prev
-    n_iter <- 0L
-
-    repeat {
-      n_iter <- n_iter + 1L
-      Y_new <- G + alpha1 * (1 - theta) * Y_guess + alpha2 * H_prev
-      if (abs(Y_new - Y_guess) < fp_tol || n_iter >= fp_max) break
-      Y_guess <- Y_new
-    }
-
-    Y_t <- Y_new
-    T_t <- theta * Y_t
-    YD_t <- Y_t - T_t
-    C_t <- Y_t - G
-    H_t <- H_prev + YD_t - C_t
-
-    out[tt, c("Y", "T_tax", "YD", "C", "H", "fp_iters")] <- c(Y_t, T_t, YD_t, C_t, H_t, n_iter)
-
-    H_prev <- H_t
-    Y_prev <- Y_t
-  }
-
-  out
-}
-```
-
-```{r step1_run}
-T_h <- 20
-pars <- list(G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2)
-ss <- sim_steady_state(pars$G, pars$theta, pars$alpha1, pars$alpha2)
-
-Y0_low <- 0.7 * ss$Y_star
-Y0_high <- 1.3 * ss$Y_star
-
-H0_from_Y <- function(Y0, G, theta, alpha1, alpha2) {
-  (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
-}
-
-H0_low <- H0_from_Y(Y0_low, pars$G, pars$theta, pars$alpha1, pars$alpha2)
-H0_high <- H0_from_Y(Y0_high, pars$G, pars$theta, pars$alpha1, pars$alpha2)
-
-lag_low <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                            Y0 = Y0_low, H0 = H0_low)
-lag_high <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                             Y0 = Y0_high, H0 = H0_high)
-cur_low <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                                   Y0 = Y0_low, H0 = H0_low)
-cur_high <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                                    Y0 = Y0_high, H0 = H0_high)
-
-step1_paths <- rbind(
-  data.frame(t = lag_low$t, Y = lag_low$Y, path = "SIM-lag (low start)"),
-  data.frame(t = lag_high$t, Y = lag_high$Y, path = "SIM-lag (high start)"),
-  data.frame(t = cur_low$t, Y = cur_low$Y, path = "SIM-current (low start)"),
-  data.frame(t = cur_high$t, Y = cur_high$Y, path = "SIM-current (high start)")
-)
-
-step1_paths$year <- core_config$year + step1_paths$t - 1
-
-tail(step1_paths)
-```
-
-```{r step1_plot, fig.height=4, fig.width=7}
-ggplot2::ggplot(step1_paths, ggplot2::aes(year, Y, color = path)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::geom_hline(yintercept = ss$Y_star, linetype = "dashed", linewidth = 0.8) +
-  ggplot2::labs(
-    title = "Step 1: SIM-lag and SIM-current converge to analytic fixed point",
-    y = "GDP",
-    color = "Simulation"
-  ) +
-  ggplot2::theme_minimal()
-```
-
-### Interpretation
-
-Both dynamic variants converge asymptotically to the same fixed point. At the fixed point, lagged/current timing no longer matters.
-
-## Step 2: SIOT 2020 and Exogenous Energy Transition with Closure Options
-
-### Objective
-
-Load SIOT for the core configuration (default: Austria 2020, product-by-product, TOTAL; cache-first from Eurostat API) and simulate an exogenous 20-year energy transition using closure options from `closure_utils.R`.
-
-### Equations
-
--   Output identity: `x_t = (I - A_t)^(-1) * f_t`
--   Closure growth map (from `closure_utils.R`):
-    -   `g_R`, `g_N`, `g_O` depend on selected closure.
--   Policy targets for energy sectors (exogenous in this step):
-    -   `eps_green`, `eps_brown`
-
-### What Changed from Step 1
-
-Added sectoral production block and closure logic. Household/government behavior is still not endogenized here.
-
-```{r step2_functions}
-source("closure_utils.R")
 
 simulate_iot_exogenous_transition <- function(iot,
                                               T = 20,

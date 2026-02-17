@@ -76,3 +76,8 @@ tutorial_sfc-io_step*.py
 *.tiff
 *.tif
 *.pdf
+
+# Refactored generated layout
+R/
+Python/
+data/
