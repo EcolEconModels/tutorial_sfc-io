@@ -1,9 +1,13 @@
 ---
-title: "Minimal SFC-IO Tutorial"
+title: "Minimal SFC-IO Tutorial (R-Only)"
 format:
   html:
     toc: true
     number-sections: true
+    embed-resources: true
+  revealjs:
+    slide-number: true
+    incremental: false
     embed-resources: true
 execute:
   echo: true
@@ -11,15 +15,88 @@ execute:
   message: false
 ---
 
-This `.qmd` is the single source of truth.
+This tutorial is the canonical source of truth. It is designed for a 30-minute session for participants already familiar with MRIO and applied economics.
 
-- Generate standalone script: `Rscript build_tutorial.R --purl-only`
-- Render notebook html: `Rscript build_tutorial.R`
-- Render notebook + slides: `Rscript build_tutorial.R --reveal`
+Build commands:
 
-## Setup and Data
+-   `Rscript build_tutorial.R --generate-r --generate-step-r`
+-   `Rscript build_tutorial.R --render-html`
+-   `Rscript build_tutorial.R --render-slides`
 
-```{r helpers}
+## Shared Setup
+
+Required packages: `jsonlite`, `ggplot2`.
+
+```{r shared_setup}
+required_packages <- c("jsonlite", "ggplot2")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+}
+
+# -----------------------------
+# Config (editable at top)
+# -----------------------------
+# Environment overrides are supported for scripted runs:
+# SFC_IO_COUNTRY, SFC_IO_YEAR, SFC_IO_SCOPE, SFC_IO_TABLE_TYPE
+# SFC_EMIS_COUNTRY, SFC_EMIS_YEAR, SFC_EMIS_SCOPE, SFC_EMIS_TABLE_TYPE, SFC_EMIS_AIRPOL
+
+core_config <- list(
+  country = Sys.getenv("SFC_IO_COUNTRY", "AT"),
+  year = as.integer(Sys.getenv("SFC_IO_YEAR", "2020")),
+  scope = Sys.getenv("SFC_IO_SCOPE", "TOTAL"),
+  table_type = Sys.getenv("SFC_IO_TABLE_TYPE", "product_by_product"),
+  freq = "A",
+  iot_unit = "MIO_EUR",
+  wealth_unit = "MIO_EUR",
+  wealth_co_nco = "NCO",
+  wealth_na_item = "BF90",
+  wealth_finpos = "LIAB",
+  emissions_airpol = "CO2",
+  emissions_unit = "THS_T",
+  cache_dir = "data_cache",
+  enforce_co2_consistency = FALSE
+)
+
+emissions_config <- list(
+  country = Sys.getenv("SFC_EMIS_COUNTRY", "BE"),
+  year = as.integer(Sys.getenv("SFC_EMIS_YEAR", "2020")),
+  scope = Sys.getenv("SFC_EMIS_SCOPE", "TOTAL"),
+  table_type = Sys.getenv("SFC_EMIS_TABLE_TYPE", "industry_by_industry"),
+  freq = "A",
+  iot_unit = "MIO_EUR",
+  wealth_unit = "MIO_EUR",
+  wealth_co_nco = "NCO",
+  wealth_na_item = "BF90",
+  wealth_finpos = "LIAB",
+  emissions_airpol = Sys.getenv("SFC_EMIS_AIRPOL", "CO2"),
+  emissions_unit = "THS_T",
+  cache_dir = "data_cache",
+  enforce_co2_consistency = TRUE
+)
+
+validate_tutorial_config <- function(cfg) {
+  valid_scope <- c("TOTAL", "DOM")
+  valid_table_type <- c("industry_by_industry", "product_by_product")
+
+  if (!(cfg$scope %in% valid_scope)) {
+    stop("Invalid scope: ", cfg$scope, ". Use one of: ", paste(valid_scope, collapse = ", "), call. = FALSE)
+  }
+  if (!(cfg$table_type %in% valid_table_type)) {
+    stop("Invalid table_type: ", cfg$table_type, ". Use one of: ", paste(valid_table_type, collapse = ", "), call. = FALSE)
+  }
+
+  if (identical(cfg$table_type, "product_by_product") && isTRUE(cfg$enforce_co2_consistency)) {
+    stop(
+      "Configuration not supported: product_by_product with enforced CO2 consistency. ",
+      "AEA emissions are by industries (NACE), not products.",
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
+}
+
 as_numeric_clean <- function(x) {
   y <- gsub(",", "", as.character(x), fixed = TRUE)
   y <- gsub(" ", "", y, fixed = TRUE)
@@ -34,189 +111,831 @@ safe_div <- function(num, den, default = 0) {
   out
 }
 
-check_setup <- function() {
-  required_packages <- c("readxl", "ggplot2")
-  missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(missing_packages) > 0) {
-    stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
-  }
-
-  required_files <- c("IOT_AT_2021_TOTAL_energy_green_brown.xlsx", "wealth_assets.xlsx")
-  missing_files <- required_files[!file.exists(required_files)]
-  if (length(missing_files) > 0) {
-    stop("Missing data file(s): ", paste(missing_files, collapse = ", "), call. = FALSE)
-  }
-  invisible(TRUE)
+ensure_cache_dir <- function(cache_dir = "data_cache") {
+  if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+  cache_dir
 }
 
-load_data <- function(base_year = 2021) {
-  check_setup()
-
-  io <- as.data.frame(readxl::read_xlsx(
-    "IOT_AT_2021_TOTAL_energy_green_brown.xlsx",
-    sheet = "Sheet 1",
-    range = "A11:CE95",
-    col_names = TRUE
-  ))
-
-  wealth <- readxl::read_xlsx(
-    "wealth_assets.xlsx",
-    sheet = "nasa_10_f_bs",
-    range = "A10:M19",
-    col_names = TRUE
-  )
-
-  label_col <- "PRD_USE (Labels)"
-  if (!(label_col %in% names(io))) stop("Missing PRD_USE labels in IO.", call. = FALSE)
-
-  sector_labels <- as.character(io[[label_col]][2:66])
-  if (length(sector_labels) != 65) stop("Expected 65 sectors.", call. = FALSE)
-
-  co2_sheet <- tail(readxl::excel_sheets("IOT_AT_2021_TOTAL_energy_green_brown.xlsx"), 1)
-  co2_tbl <- readxl::read_xlsx(
-    "IOT_AT_2021_TOTAL_energy_green_brown.xlsx",
-    sheet = co2_sheet,
-    col_names = TRUE
-  )
-  co2_match <- match(sector_labels, as.character(co2_tbl[["To Sector"]]))
-  if (any(is.na(co2_match))) stop("Missing CO2 intensities for some sectors.", call. = FALSE)
-
-  list(
-    base_year = base_year,
-    io = io,
-    wealth = wealth,
-    sector_labels = sector_labels,
-    co2_tbl = co2_tbl,
-    co2_match = co2_match
-  )
+sanitize_for_filename <- function(x) {
+  gsub("[^A-Za-z0-9_\\-]", "_", x)
 }
 
-calibrate_base <- function(data) {
-  io <- data$io
-  wealth <- data$wealth
-  n <- 65
+cache_file_for_query <- function(dataset_id, params, cache_dir) {
+  key_parts <- character(0)
+  for (nm in names(params)) {
+    vv <- params[[nm]]
+    if (length(vv) == 0) next
+    key_parts <- c(key_parts, paste0(nm, '-', as.character(vv)))
+  }
+  key <- paste(key_parts, collapse = '__')
+  file.path(cache_dir, paste0(dataset_id, '__', sanitize_for_filename(key), '.json'))
+}
 
-  Z <- matrix(as_numeric_clean(unlist(io[2:66, 3:67])), nrow = n, ncol = n)
-  q_s <- as_numeric_clean(io[84, 3:67])
-  q_s[!is.finite(q_s) | q_s <= 0] <- 1e-9
+fetch_eurostat_json <- function(dataset_id, params, cache_dir = 'data_cache') {
+  cache_dir <- ensure_cache_dir(cache_dir)
+  cache_file <- cache_file_for_query(dataset_id, params, cache_dir)
 
-  A <- sweep(Z, 2, q_s, "/")
-  A[!is.finite(A)] <- 0
-  L <- solve(diag(n) - A)
+  if (file.exists(cache_file)) {
+    return(jsonlite::read_json(cache_file, simplifyVector = FALSE))
+  }
 
-  C_i0 <- as_numeric_clean(io[2:66, "Final consumption expenditure by households"]) +
-    as_numeric_clean(io[2:66, "Final consumption expenditure by non-profit organisations serving households (NPISH)"])
-  G_i0 <- as_numeric_clean(io[2:66, "Final consumption expenditure by government"])
-  I_i0 <- as_numeric_clean(io[2:66, "Gross capital formation...72"])
-  EX_i0 <- as_numeric_clean(io[2:66, "Exports of goods and services"])
-  X_i0 <- as_numeric_clean(io[2:66, "Total use"])
+  query_parts <- character(0)
+  for (nm in names(params)) {
+    vv <- params[[nm]]
+    if (length(vv) == 0) next
+    for (v in vv) {
+      query_parts <- c(query_parts, paste0(nm, '=', utils::URLencode(as.character(v), reserved = TRUE)))
+    }
+  }
 
-  C0 <- sum(C_i0)
-  G0 <- sum(G_i0)
+  base <- 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data'
+  query <- paste(query_parts, collapse = '&')
+  url <- paste0(base, '/', dataset_id, '?', query)
 
-  beta_C <- safe_div(C_i0, rep(C0, n))
-  beta_G <- safe_div(G_i0, rep(G0, n))
-  beta_C <- beta_C / sum(beta_C)
-  beta_G <- beta_G / sum(beta_G)
+  ok <- tryCatch({
+    utils::download.file(url, destfile = cache_file, mode = 'wb', quiet = TRUE)
+    TRUE
+  }, error = function(e) FALSE)
 
-  imports_row <- which(io[["PRD_USE (Labels)"]] == "Imports of goods and services")
-  imports_i <- as_numeric_clean(io[imports_row, 3:67])
-  m_i <- pmin(pmax(safe_div(imports_i, X_i0), 0), 0.95)
+  if (!ok || !file.exists(cache_file)) {
+    stop('Eurostat download failed for ', dataset_id, '. URL: ', url, call. = FALSE)
+  }
 
-  va_row <- which(io[["PRD_USE (Labels)"]] == "Value added, gross")
-  va_i <- as_numeric_clean(io[va_row, 3:67])
-  va_coeff <- safe_div(va_i, q_s)
+  jsonlite::read_json(cache_file, simplifyVector = FALSE)
+}
+
+ordered_categories <- function(dim_obj) {
+  raw_idx <- unlist(dim_obj[["category"]][["index"]])
+  pos <- as.integer(raw_idx)
+  codes <- names(raw_idx)
+  ord <- order(pos)
+  codes <- codes[ord]
+
+  lbl_all <- dim_obj[["category"]][["label"]]
+  labels <- unlist(lbl_all[codes])
+  labels[is.na(labels)] <- codes[is.na(labels)]
+
+  data.frame(code = codes, label = labels, stringsAsFactors = FALSE)
+}
+
+decode_jsonstat_index <- function(flat0, sizes) {
+  k <- length(sizes)
+  pos <- integer(k)
+  rem <- as.integer(flat0)
+  for (i in seq_len(k)) {
+    stride <- if (i == k) 1L else as.integer(prod(sizes[(i + 1):k]))
+    pos[i] <- rem %/% stride
+    rem <- rem %% stride
+  }
+  pos
+}
+
+extract_matrix_from_json <- function(js, row_dim, col_dim) {
+  ids <- unlist(js[["id"]])
+  sizes <- as.integer(unlist(js[["size"]]))
+
+  row_i <- match(row_dim, ids)
+  col_i <- match(col_dim, ids)
+
+  if (is.na(row_i) || is.na(col_i)) {
+    stop("Could not find row/col dimensions in dataset.", call. = FALSE)
+  }
+
+  row_cat <- ordered_categories(js[["dimension"]][[row_dim]])
+  col_cat <- ordered_categories(js[["dimension"]][[col_dim]])
+
+  vals <- unlist(js[["value"]])
+  if (length(vals) == 0) {
+    stop("No observations in returned dataset for requested filters.", call. = FALSE)
+  }
+
+  M <- matrix(NA_real_, nrow = nrow(row_cat), ncol = nrow(col_cat))
+  flat_idx <- as.integer(names(vals))
+
+  for (j in seq_along(flat_idx)) {
+    pos <- decode_jsonstat_index(flat_idx[j], sizes)
+    rr <- pos[row_i] + 1L
+    cc <- pos[col_i] + 1L
+    M[rr, cc] <- as.numeric(vals[[j]])
+  }
+
+  list(M = M, row_cat = row_cat, col_cat = col_cat, ids = ids, sizes = sizes)
+}
+
+extract_values_by_dim <- function(js, dim_name) {
+  ids <- unlist(js[["id"]])
+  sizes <- as.integer(unlist(js[["size"]]))
+  dim_i <- match(dim_name, ids)
+  if (is.na(dim_i)) stop("Dimension not found: ", dim_name, call. = FALSE)
+
+  cat_tbl <- ordered_categories(js[["dimension"]][[dim_name]])
+  vals <- unlist(js[["value"]])
+  if (length(vals) == 0) return(setNames(numeric(0), character(0)))
+
+  out <- rep(NA_real_, nrow(cat_tbl))
+  names(out) <- cat_tbl$code
+
+  flat_idx <- as.integer(names(vals))
+  for (j in seq_along(flat_idx)) {
+    pos <- decode_jsonstat_index(flat_idx[j], sizes)
+    key <- cat_tbl$code[pos[dim_i] + 1L]
+    out[key] <- as.numeric(vals[[j]])
+  }
+
+  out
+}
+
+normalize_nace_code <- function(x) {
+  y <- toupper(as.character(x))
+  y <- gsub("-", "_", y)
+  y <- gsub("\\.", "", y)
+  # C10_12 -> C10_C12, E37_39 -> E37_E39, etc.
+  y <- gsub("^([A-Z])(\\d{2})_(\\d{2})$", "\\1\\2_\\1\\3", y, perl = TRUE)
+  y
+}
+
+iot_schema <- function(table_type) {
+  if (identical(table_type, "industry_by_industry")) {
+    list(dataset_id = "naio_10_cp1750", row_dim = "ind_ava", col_dim = "ind_use")
+  } else {
+    list(dataset_id = "naio_10_cp1700", row_dim = "prd_ava", col_dim = "prd_use")
+  }
+}
+
+sum_matching_cols <- function(M, col_codes, col_labels, patterns, default = 0) {
+  hit <- logical(length(col_codes))
+  for (p in patterns) {
+    hit <- hit | grepl(p, col_codes, ignore.case = TRUE) | grepl(p, col_labels, ignore.case = TRUE)
+  }
+  if (!any(hit)) {
+    return(rep(default, nrow(M)))
+  }
+  rowSums(M[, hit, drop = FALSE], na.rm = TRUE)
+}
+
+select_sector_codes <- function(row_codes, col_codes, x_by_row) {
+  exclude_codes <- c(
+    "TOTAL", "TU", "TFU", "TS_BP", "IMP",
+    "B1G", "B2A3N", "B2A3G", "B3G", "P1", "P2_ADJ", "D21X31",
+    "P7", "P7_B0", "P7_D0", "P7_U2", "P7_U3"
+  )
+
+  candidate <- intersect(row_codes, col_codes)
+  candidate <- setdiff(candidate, exclude_codes)
+
+  # Keep rows with finite/non-trivial total use
+  valid_x <- names(x_by_row)[is.finite(x_by_row) & x_by_row > 1e-9]
+  candidate <- intersect(candidate, valid_x)
+
+  if (length(candidate) < 20) {
+    stop("Could not identify sector set from IOT matrix.", call. = FALSE)
+  }
+
+  candidate
+}
+
+get_aea_codes <- function(cfg) {
+  params <- list(
+    freq = cfg$freq,
+    airpol = cfg$emissions_airpol,
+    unit = cfg$emissions_unit,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+  js <- fetch_eurostat_json("env_ac_ainah_r2", params, cache_dir = cfg$cache_dir)
+  code_tbl <- ordered_categories(js[["dimension"]][["nace_r2"]])
+  code_tbl$norm <- normalize_nace_code(code_tbl$code)
+
+  val_by_code <- extract_values_by_dim(js, "nace_r2")
+  nz_codes <- names(val_by_code)[is.finite(val_by_code) & !is.na(val_by_code)]
+  nz_norm <- normalize_nace_code(nz_codes)
+  unique(nz_norm)
+}
+
+download_or_load_iot <- function(cfg) {
+  schema <- iot_schema(cfg$table_type)
+
+  params <- list(
+    freq = cfg$freq,
+    unit = cfg$iot_unit,
+    stk_flow = cfg$scope,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+
+  js <- fetch_eurostat_json(schema$dataset_id, params, cache_dir = cfg$cache_dir)
+  mat <- tryCatch(
+    extract_matrix_from_json(js, schema$row_dim, schema$col_dim),
+    error = function(e) {
+      stop(
+        'No IOT data for requested configuration: country=', cfg$country,
+        ', year=', cfg$year,
+        ', scope=', cfg$scope,
+        ', table_type=', cfg$table_type,
+        '. ', e$message,
+        call. = FALSE
+      )
+    }
+  )
+
+  row_codes <- mat$row_cat$code
+  row_labels <- mat$row_cat$label
+  col_codes <- mat$col_cat$code
+  col_labels <- mat$col_cat$label
+
+  tu_col <- match("TU", col_codes)
+  if (is.na(tu_col)) {
+    tu_col <- match("TOTAL", col_codes)
+  }
+  if (is.na(tu_col)) {
+    stop("Could not find TU/TOTAL use column in IOT data.", call. = FALSE)
+  }
+
+  x_by_row <- mat$M[, tu_col]
+  names(x_by_row) <- row_codes
+
+  sector_codes <- select_sector_codes(row_codes, col_codes, x_by_row)
+
+  # If emissions consistency is requested, keep only sectors with AEA coverage
+  if (isTRUE(cfg$enforce_co2_consistency)) {
+    if (!identical(cfg$table_type, "industry_by_industry")) {
+      stop("CO2 consistency requires industry_by_industry mode.", call. = FALSE)
+    }
+    aea_norm <- get_aea_codes(cfg)
+    sec_norm <- normalize_nace_code(sector_codes)
+    keep <- sec_norm %in% aea_norm
+    sector_codes <- sector_codes[keep]
+    if (length(sector_codes) < 20) {
+      stop(
+        "Requested configuration has insufficient overlap between IOT sectors and AEA sectors. ",
+        "Check country/year/scope/table_type.",
+        call. = FALSE
+      )
+    }
+  }
+
+  r_idx <- match(sector_codes, row_codes)
+  c_idx <- match(sector_codes, col_codes)
+
+  Z <- mat$M[r_idx, c_idx, drop = FALSE]
+  x0 <- as.numeric(x_by_row[sector_codes])
+  names(x0) <- sector_codes
+
+  x_safe <- x0
+  x_safe[!is.finite(x_safe) | x_safe <= 0] <- 1e-9
+
+  A0 <- sweep(Z, 2, x_safe, "/")
+  A0[!is.finite(A0)] <- 0
+
+  L0 <- tryCatch(
+    solve(diag(length(sector_codes)) - A0),
+    error = function(e) solve(diag(length(sector_codes)) - A0 + diag(1e-8, length(sector_codes)))
+  )
+
+  # Final demand components
+  C_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P3_S14$", "households"))
+  C_i0 <- C_i0 + sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P3_S15$", "NPISH"))
+  G_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P3_S13$", "government"))
+
+  I_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P51G$", "^P52$", "^P53$", "^P5$", "gross capital"))
+  EX_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P6$", "^P6_", "exports"))
+
+  # Imports row for leakage proxy
+  imp_row <- which(row_codes %in% c("P7", "IMP"))
+  if (length(imp_row) == 0) {
+    imp_row <- grep("imports", row_labels, ignore.case = TRUE)
+  }
+  imports_i <- if (length(imp_row) > 0) {
+    as.numeric(mat$M[imp_row[1], c_idx, drop = TRUE])
+  } else {
+    rep(0, length(sector_codes))
+  }
+  m_i <- pmin(pmax(safe_div(imports_i, x0), 0), 0.95)
+
+  # Value added coefficient: prefer B1G row if available, else 1 - column sum(A)
+  va_row <- which(row_codes == "B1G")
+  va_coeff <- if (length(va_row) > 0) {
+    va_val <- as.numeric(mat$M[va_row[1], c_idx, drop = TRUE])
+    safe_div(va_val, x0)
+  } else {
+    pmax(1 - colSums(A0, na.rm = TRUE), 0)
+  }
   va_coeff[!is.finite(va_coeff) | va_coeff < 0] <- 0
 
-  Y0 <- sum(va_coeff * X_i0)
-  tau_y <- (as_numeric_clean(io[73, "Total use"]) + as_numeric_clean(io[74, "Total use"])) / Y0
-  tau_y <- ifelse(is.finite(tau_y), pmin(pmax(tau_y, 0), 0.6), 0.2)
+  beta_C <- safe_div(C_i0, rep(sum(C_i0), length(C_i0)))
+  beta_G <- safe_div(G_i0, rep(sum(G_i0), length(G_i0)))
 
-  w_assets_col <- names(wealth)[2]
-  w_liab_col <- names(wealth)[3]
-  hh_row <- which(wealth[["NA_ITEM (Labels)"]] == "Households")
-  npish_row <- which(grepl("^Non-profit institutions", wealth[["NA_ITEM (Labels)"]]))
-  gov_row <- which(wealth[["NA_ITEM (Labels)"]] == "General government")
-
-  hh_assets <- as_numeric_clean(wealth[hh_row, w_assets_col])
-  hh_liab <- as_numeric_clean(wealth[hh_row, w_liab_col])
-  npish_assets <- if (length(npish_row) == 1) as_numeric_clean(wealth[npish_row, w_assets_col]) else 0
-  npish_liab <- if (length(npish_row) == 1) as_numeric_clean(wealth[npish_row, w_liab_col]) else 0
-
-  V0 <- (hh_assets - hh_liab) + (npish_assets - npish_liab)
-  B0 <- as_numeric_clean(wealth[gov_row, w_liab_col])
-
-  s_prod <- as_numeric_clean(data$co2_tbl[["Mean CO2 intensity (kg/M€)"]][data$co2_match])
-  s_prod[!is.finite(s_prod)] <- 0
+  if (sum(beta_C) > 0) beta_C <- beta_C / sum(beta_C)
+  if (sum(beta_G) > 0) beta_G <- beta_G / sum(beta_G)
 
   list(
-    base_year = data$base_year,
-    n = n,
-    sector_labels = data$sector_labels,
-    L = L,
-    va_coeff = va_coeff,
-    beta_C = beta_C,
-    beta_G = beta_G,
-    m_i = m_i,
+    base_year = cfg$year,
+    country = cfg$country,
+    scope = cfg$scope,
+    table_type = cfg$table_type,
+    dataset_id = schema$dataset_id,
+    n = length(sector_codes),
+    sector_codes = sector_codes,
+    sector_labels = row_labels[r_idx],
+    Z0 = Z,
+    A0 = A0,
+    L0 = L0,
+    x0 = x0,
+    C_i0 = C_i0,
+    G_i0 = G_i0,
     I_i0 = I_i0,
     EX_i0 = EX_i0,
-    tau_y = tau_y,
-    V0 = V0,
-    B0 = B0,
-    G0 = G0,
-    s_prod = s_prod,
-    idx_brown = match("Energy Brown", data$sector_labels),
-    idx_green = match("Energy Green", data$sector_labels)
+    F0 = C_i0 + G_i0 + I_i0 + EX_i0,
+    m_i = m_i,
+    va_coeff = va_coeff,
+    Y0 = sum(va_coeff * x0),
+    G0 = sum(G_i0),
+    beta_C = beta_C,
+    beta_G = beta_G
   )
+}
+
+load_wealth_init <- function(cfg) {
+  params <- list(
+    freq = cfg$freq,
+    unit = cfg$wealth_unit,
+    co_nco = cfg$wealth_co_nco,
+    sector = c("S13", "S14"),
+    finpos = cfg$wealth_finpos,
+    na_item = cfg$wealth_na_item,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+
+  js <- fetch_eurostat_json("nasa_10_f_bs", params, cache_dir = cfg$cache_dir)
+  sector_vals <- extract_values_by_dim(js, "sector")
+
+  if (!("S14" %in% names(sector_vals)) || !("S13" %in% names(sector_vals))) {
+    stop("Wealth dataset missing S14 or S13 for selected configuration.", call. = FALSE)
+  }
+
+  hh_net_worth <- as.numeric(sector_vals[["S14"]])
+  gov_net_worth <- as.numeric(sector_vals[["S13"]])
+
+  if (!is.finite(hh_net_worth) || !is.finite(gov_net_worth)) {
+    stop("Wealth values are unavailable/non-finite for selected configuration.", call. = FALSE)
+  }
+
+  list(
+    V0 = hh_net_worth,
+    B0 = max(-gov_net_worth, 0)
+  )
+}
+
+load_aea_emissions <- function(cfg, sector_codes, x0) {
+  if (!identical(cfg$table_type, "industry_by_industry")) {
+    stop("AEA emissions are not directly available for product_by_product configuration.", call. = FALSE)
+  }
+
+  params <- list(
+    freq = cfg$freq,
+    airpol = cfg$emissions_airpol,
+    unit = cfg$emissions_unit,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+
+  js <- fetch_eurostat_json("env_ac_ainah_r2", params, cache_dir = cfg$cache_dir)
+  aea_vals <- extract_values_by_dim(js, "nace_r2")
+
+  aea_norm <- normalize_nace_code(names(aea_vals))
+  names(aea_vals) <- aea_norm
+
+  sec_norm <- normalize_nace_code(sector_codes)
+  em_ths_t <- as.numeric(aea_vals[sec_norm])
+  names(em_ths_t) <- sector_codes
+
+  missing <- !is.finite(em_ths_t)
+  if (any(missing)) {
+    stop(
+      "CO2 emissions unavailable for sector code(s): ",
+      paste(sector_codes[missing], collapse = ", "),
+      ". Adjust configuration or disable strict consistency.",
+      call. = FALSE
+    )
+  }
+
+  intensity_kg_per_meur <- safe_div(em_ths_t * 1e6, as.numeric(x0))
+  intensity_kg_per_meur[!is.finite(intensity_kg_per_meur)] <- 0
+
+  data.frame(
+    sector = sector_codes,
+    intensity_kg_per_meur = intensity_kg_per_meur,
+    stringsAsFactors = FALSE
+  )
+}
+
+find_energy_indices <- function(sector_codes, sector_labels) {
+  # Industry mode defaults
+  idx_brown <- match("C19", sector_codes)
+  idx_green <- match("D", sector_codes)
+
+  if (!is.finite(idx_brown) || is.na(idx_brown)) {
+    idx_brown <- which(grepl("petroleum|coke|coal", sector_labels, ignore.case = TRUE))[1]
+  }
+  if (!is.finite(idx_green) || is.na(idx_green)) {
+    idx_green <- which(grepl("electricity|gas|steam", sector_labels, ignore.case = TRUE))[1]
+  }
+
+  list(idx_green = idx_green, idx_brown = idx_brown)
 }
 ```
 
-```{r load-and-calibrate}
-check_setup()
-data_obj <- load_data(2021)
-calib <- calibrate_base(data_obj)
+## Step 1: SIM Closed Model (Lag and Current)
 
-data.frame(
-  metric = c("Sectors", "tau_y", "G0", "V0", "B0"),
-  value = c(calib$n, calib$tau_y, calib$G0, calib$V0, calib$B0)
-)
+### Objective
+
+Implement the textbook SIM core in closed economy form and compare:
+
+-   `SIM-lag`: behavior depends on lagged disposable income.
+-   `SIM-current`: current disposable income solved each period by fixed-point iteration.
+-   Analytic steady-state benchmark `Y* = G / theta`.
+
+### SIM Balance Sheet (minimal)
+
+| Sector     | Government Bills | Net Worth |
+|------------|-----------------:|----------:|
+| Households |               +H |        +V |
+| Government |               -B |        -B |
+| Sum        |                0 |         0 |
+
+### SIM Transactions-Flow Matrix (minimal)
+
+| Flow                | Households | Government | Sum |
+|---------------------|-----------:|-----------:|----:|
+| Consumption         |         -C |         +C |   0 |
+| Government spending |         +G |         -G |   0 |
+| Taxes               |         -T |         +T |   0 |
+| Change in bills     |        +dH |        -dB |   0 |
+| Sum                 |          0 |          0 |   0 |
+
+### Equations
+
+-   `Y_t = C_t + G`
+-   `T_t = theta * Y_t`
+-   `YD_t = Y_t - T_t`
+-   `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}`
+-   `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` (solved by fixed point each period)
+-   `H_t = H_{t-1} + YD_t - C_t`
+-   Steady state: `Y* = G / theta`
+
+### What Changed from Shared Setup
+
+Added only the macro behavioral block (no IOT yet).
+
+```{r step1_functions}
+sim_steady_state <- function(G, theta, alpha1, alpha2) {
+  Y_star <- G / theta
+  H_star <- ((1 - alpha1) * (1 - theta) / alpha2) * Y_star
+  list(Y_star = Y_star, H_star = H_star)
+}
+
+simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
+                             Y0 = 80, H0 = 300) {
+  out <- data.frame(
+    t = seq_len(T),
+    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_
+  )
+
+  YD_prev <- (1 - theta) * Y0
+  H_prev <- H0
+
+  for (tt in seq_len(T)) {
+    C_t <- alpha1 * YD_prev + alpha2 * H_prev
+    Y_t <- C_t + G
+    T_t <- theta * Y_t
+    YD_t <- Y_t - T_t
+    H_t <- H_prev + YD_t - C_t
+
+    out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
+
+    YD_prev <- YD_t
+    H_prev <- H_t
+  }
+
+  out
+}
+
+simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
+                                    Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
+  out <- data.frame(
+    t = seq_len(T),
+    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_,
+    fp_iters = NA_integer_
+  )
+
+  H_prev <- H0
+  Y_prev <- Y0
+
+  for (tt in seq_len(T)) {
+    Y_guess <- Y_prev
+    n_iter <- 0L
+
+    repeat {
+      n_iter <- n_iter + 1L
+      Y_new <- G + alpha1 * (1 - theta) * Y_guess + alpha2 * H_prev
+      if (abs(Y_new - Y_guess) < fp_tol || n_iter >= fp_max) break
+      Y_guess <- Y_new
+    }
+
+    Y_t <- Y_new
+    T_t <- theta * Y_t
+    YD_t <- Y_t - T_t
+    C_t <- Y_t - G
+    H_t <- H_prev + YD_t - C_t
+
+    out[tt, c("Y", "T_tax", "YD", "C", "H", "fp_iters")] <- c(Y_t, T_t, YD_t, C_t, H_t, n_iter)
+
+    H_prev <- H_t
+    Y_prev <- Y_t
+  }
+
+  out
+}
 ```
 
-## Step 1: Simplest Model (Closed SFC-IO)
+```{r step1_run}
+T_h <- 20
+pars <- list(G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2)
+ss <- sim_steady_state(pars$G, pars$theta, pars$alpha1, pars$alpha2)
 
-```{r step1-function}
-simulate_step1_closed <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01) {
-  n <- calib$n
+Y0_low <- 0.7 * ss$Y_star
+Y0_high <- 1.3 * ss$Y_star
+
+H0_from_Y <- function(Y0, G, theta, alpha1, alpha2) {
+  (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
+}
+
+H0_low <- H0_from_Y(Y0_low, pars$G, pars$theta, pars$alpha1, pars$alpha2)
+H0_high <- H0_from_Y(Y0_high, pars$G, pars$theta, pars$alpha1, pars$alpha2)
+
+lag_low <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                            Y0 = Y0_low, H0 = H0_low)
+lag_high <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                             Y0 = Y0_high, H0 = H0_high)
+cur_low <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                                   Y0 = Y0_low, H0 = H0_low)
+cur_high <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
+                                    Y0 = Y0_high, H0 = H0_high)
+
+step1_paths <- rbind(
+  data.frame(t = lag_low$t, Y = lag_low$Y, path = "SIM-lag (low start)"),
+  data.frame(t = lag_high$t, Y = lag_high$Y, path = "SIM-lag (high start)"),
+  data.frame(t = cur_low$t, Y = cur_low$Y, path = "SIM-current (low start)"),
+  data.frame(t = cur_high$t, Y = cur_high$Y, path = "SIM-current (high start)")
+)
+
+step1_paths$year <- core_config$year + step1_paths$t - 1
+
+tail(step1_paths)
+```
+
+```{r step1_plot, fig.height=4, fig.width=7}
+ggplot2::ggplot(step1_paths, ggplot2::aes(year, Y, color = path)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::geom_hline(yintercept = ss$Y_star, linetype = "dashed", linewidth = 0.8) +
+  ggplot2::labs(
+    title = "Step 1: SIM-lag and SIM-current converge to analytic fixed point",
+    y = "GDP",
+    color = "Simulation"
+  ) +
+  ggplot2::theme_minimal()
+```
+
+### Interpretation
+
+Both dynamic variants converge asymptotically to the same fixed point. At the fixed point, lagged/current timing no longer matters.
+
+## Step 2: SIOT 2020 and Exogenous Energy Transition with Closure Options
+
+### Objective
+
+Load SIOT for the core configuration (default: Austria 2020, product-by-product, TOTAL; cache-first from Eurostat API) and simulate an exogenous 20-year energy transition using closure options from `closure_utils.R`.
+
+### Equations
+
+-   Output identity: `x_t = (I - A_t)^(-1) * f_t`
+-   Closure growth map (from `closure_utils.R`):
+    -   `g_R`, `g_N`, `g_O` depend on selected closure.
+-   Policy targets for energy sectors (exogenous in this step):
+    -   `eps_green`, `eps_brown`
+
+### What Changed from Step 1
+
+Added sectoral production block and closure logic. Household/government behavior is still not endogenized here.
+
+```{r step2_functions}
+source("closure_utils.R")
+
+simulate_iot_exogenous_transition <- function(iot,
+                                              T = 20,
+                                              closure_option = "residual-others",
+                                              g_target = 0.01,
+                                              eps_green = 0.04,
+                                              eps_brown = -0.04,
+                                              max_iter = 60) {
+  idx <- find_energy_indices(iot$sector_codes, iot$sector_labels)
+  if (!is.finite(idx$idx_green) || !is.finite(idx$idx_brown)) {
+    stop("Could not identify green/brown energy sectors.", call. = FALSE)
+  }
+
+  x_prev <- as.numeric(iot$x0)
+  F_prev <- as.numeric(iot$F0)
+  years <- iot$base_year + seq_len(T) - 1
+
+  out <- data.frame(
+    year = years,
+    closure = closure_option,
+    GDP = NA_real_,
+    X_green = NA_real_,
+    X_brown = NA_real_,
+    g_green = NA_real_,
+    g_brown = NA_real_,
+    g_other = NA_real_,
+    io_resid = NA_real_
+  )
+
+  x_store <- matrix(NA_real_, nrow = T, ncol = iot$n)
+
+  for (tt in seq_len(T)) {
+    sol <- solve_io_consistency(
+      Z_base = iot$Z0,
+      F_prev = F_prev,
+      x_init = x_prev,
+      diag_mat = diag(iot$n),
+      option = closure_option,
+      eps_R = eps_green,
+      eps_N = eps_brown,
+      g = g_target,
+      idx_ren = idx$idx_green,
+      idx_nren = idx$idx_brown,
+      p_out_ren = 1,
+      p_out_nren = 1,
+      va_coeff = iot$va_coeff,
+      target = "output",
+      max_iter = max_iter,
+      rel_io_tol = 1e-8
+    )
+
+    x_now <- pmax(as.numeric(sol$X), 0)
+    F_now <- pmax(as.numeric(sol$F), 0)
+
+    out$GDP[tt] <- sum(iot$va_coeff * x_now)
+    out$X_green[tt] <- x_now[idx$idx_green]
+    out$X_brown[tt] <- x_now[idx$idx_brown]
+    out$g_green[tt] <- sol$g_R
+    out$g_brown[tt] <- sol$g_N
+    out$g_other[tt] <- sol$g_O
+    out$io_resid[tt] <- sol$rel_io_resid
+
+    x_store[tt, ] <- x_now
+    x_prev <- x_now
+    F_prev <- F_now
+  }
+
+  list(path = out, x = x_store)
+}
+```
+
+```{r step2_run}
+validate_tutorial_config(core_config)
+iot <- download_or_load_iot(core_config)
+
+closure_options <- c("residual-others", "fixed-others", "uniform-demand", "eps-only")
+step2_results <- lapply(closure_options, function(opt) {
+  simulate_iot_exogenous_transition(iot, T = 20, closure_option = opt)
+})
+names(step2_results) <- closure_options
+
+step2_long <- do.call(rbind, lapply(names(step2_results), function(nm) {
+  d <- step2_results[[nm]]$path
+  d$closure <- nm
+  d
+}))
+rownames(step2_long) <- NULL
+
+head(step2_long)
+```
+
+```{r step2_plot, fig.height=4, fig.width=7}
+p_gdp <- ggplot2::ggplot(step2_long, ggplot2::aes(year, GDP, color = closure)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 2: GDP under closure options") +
+  ggplot2::theme_minimal()
+
+p_energy <- ggplot2::ggplot(step2_long, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9), color = closure)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 2: Brown/Green output ratio", y = "X_brown / X_green") +
+  ggplot2::theme_minimal()
+
+print(p_gdp)
+print(p_energy)
+```
+
+### Interpretation
+
+Changing closure changes where adjustment occurs (`g_green`, `g_brown`, `g_other`) even when aggregate target growth is fixed.
+
+## Step 3: SIM + IOT Integration with Endogenous Transition
+
+### Objective
+
+Integrate SIM behavior (consumption, taxes, wealth, deficit) with IO production, then let energy demand shares shift endogenously.
+
+### Equations
+
+-   `x_t = L * f_t`, where `L = (I - A)^(-1)` from base year.
+-   `Y_t = sum(v_i * x_i,t)`.
+-   `T_t = tau * Y_t`, `YD_t = Y_t - T_t`.
+-   `C_t = c_y * YD_t + c_v * V_{t-1}`.
+-   `V_t = V_{t-1} + YD_t - C_t`.
+-   `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`.
+
+### What Changed from Step 2
+
+Now household/government stocks and flows are endogenous. Transition is endogenous here (no closure solver).
+
+```{r step3_functions}
+calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
+  tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
+
+  list(
+    base_year = iot$base_year,
+    n = iot$n,
+    sector_codes = iot$sector_codes,
+    sector_labels = iot$sector_labels,
+    L = iot$L0,
+    va_coeff = iot$va_coeff,
+    beta_C = iot$beta_C,
+    beta_G = iot$beta_G,
+    I_i0 = iot$I_i0,
+    G0 = iot$G0,
+    tau_y = tau_guess,
+    V0 = wealth_init$V0,
+    B0 = wealth_init$B0,
+    idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
+  )
+}
+
+simulate_sim_iot_endogenous <- function(calib,
+                                        T = 20,
+                                        c_y = 0.82,
+                                        c_v = 0.03,
+                                        g_G = 0.01,
+                                        transition_speed = 0.0015) {
   years <- calib$base_year + seq_len(T) - 1
 
   out <- data.frame(
     year = years,
-    GDP = numeric(T), TAX = numeric(T), YD = numeric(T),
-    C = numeric(T), G = numeric(T), V = numeric(T),
-    DEF = numeric(T), B = numeric(T)
+    GDP = NA_real_,
+    TAX = NA_real_,
+    YD = NA_real_,
+    C = NA_real_,
+    G = NA_real_,
+    V = NA_real_,
+    DEF = NA_real_,
+    B = NA_real_,
+    betaC_brown = NA_real_,
+    betaC_green = NA_real_
   )
-  x_mat <- matrix(0, nrow = T, ncol = n)
+
+  x_store <- matrix(NA_real_, nrow = T, ncol = calib$n)
 
   V_prev <- calib$V0
   B_prev <- calib$B0
   G_prev <- calib$G0
+  x_prev <- as.numeric(calib$L %*% (calib$beta_C * sum(calib$I_i0) + calib$beta_G * calib$G0 + calib$I_i0))
 
-  k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% calib$beta_C))
+  beta_C <- calib$beta_C
+  beta_G <- calib$beta_G
 
-  for (t in seq_len(T)) {
-    G_t <- if (t == 1) calib$G0 else G_prev * (1 + g_G)
+  for (tt in seq_len(T)) {
+    G_t <- if (tt == 1) calib$G0 else G_prev * (1 + g_G)
 
-    other_fd <- calib$beta_G * G_t + calib$I_i0
-    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% other_fd))
+    if (is.finite(calib$idx$idx_green) && is.finite(calib$idx$idx_brown)) {
+      signal <- (x_prev[calib$idx$idx_green] - x_prev[calib$idx$idx_brown]) / pmax(sum(abs(x_prev)), 1)
+      shift <- max(0, transition_speed * (1 + signal))
+      shift <- min(shift, max(beta_C[calib$idx$idx_brown] - 1e-8, 0))
+
+      beta_C[calib$idx$idx_brown] <- beta_C[calib$idx$idx_brown] - shift
+      beta_C[calib$idx$idx_green] <- beta_C[calib$idx$idx_green] + shift
+    }
+
+    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% beta_C))
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (beta_G * G_t + calib$I_i0)))
 
     den <- 1 - c_y * (1 - calib$tau_y) * k
     C_t <- (c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den
     C_t <- max(C_t, 0)
 
-    fd_i <- calib$beta_C * C_t + other_fd
-    x_t <- as.numeric(calib$L %*% fd_i)
+    fd_t <- beta_C * C_t + beta_G * G_t + calib$I_i0
+    x_t <- pmax(as.numeric(calib$L %*% fd_t), 0)
     Y_t <- sum(calib$va_coeff * x_t)
-
     TAX_t <- calib$tau_y * Y_t
     YD_t <- Y_t - TAX_t
 
@@ -224,71 +943,170 @@ simulate_step1_closed <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0
     DEF_t <- G_t - TAX_t
     B_t <- B_prev + DEF_t
 
-    out[t, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B")] <- c(Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t)
-    x_mat[t, ] <- x_t
+    out[tt, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B", "betaC_brown", "betaC_green")] <- c(
+      Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t,
+      if (is.finite(calib$idx$idx_brown)) beta_C[calib$idx$idx_brown] else NA_real_,
+      if (is.finite(calib$idx$idx_green)) beta_C[calib$idx$idx_green] else NA_real_
+    )
 
+    x_store[tt, ] <- x_t
+    x_prev <- x_t
     V_prev <- V_t
     B_prev <- B_t
     G_prev <- G_t
   }
 
-  list(aggregate = out, x = x_mat)
+  list(aggregate = out, x = x_store)
 }
 ```
 
-```{r step1-run}
-step1 <- simulate_step1_closed(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01)
-head(step1$aggregate)
+```{r step3_run}
+if (!exists('iot')) {
+  validate_tutorial_config(core_config)
+  iot <- download_or_load_iot(core_config)
+}
+if (!exists('wealth_init')) {
+  wealth_init <- load_wealth_init(core_config)
+}
+calib3 <- calibrate_sim_iot(iot, wealth_init)
+
+step3_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
+step3_transition <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0.003)
+
+step3_compare <- rbind(
+  data.frame(step3_baseline$aggregate, scenario = 'baseline'),
+  data.frame(step3_transition$aggregate, scenario = 'endogenous_transition')
+)
+
+tail(step3_compare)
 ```
 
-```{r step1-plot, fig.height=4, fig.width=7}
-ggplot2::ggplot(step1$aggregate, ggplot2::aes(year, GDP)) +
+```{r step3_plot, fig.height=4, fig.width=7}
+p3_gdp <- ggplot2::ggplot(step3_compare, ggplot2::aes(year, GDP, color = scenario)) +
   ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 1: GDP (closed model)", y = "M EUR") +
+  ggplot2::labs(title = "Step 3: GDP with SIM+IOT") +
   ggplot2::theme_minimal()
+
+p3_share <- ggplot2::ggplot(step3_compare, ggplot2::aes(year, betaC_brown, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 3: Brown demand share (endogenous shift)") +
+  ggplot2::theme_minimal()
+
+print(p3_gdp)
+print(p3_share)
 ```
 
-## Step 2: Add RoW (Imports and Exports)
+### Interpretation
 
-```{r step2-function}
-simulate_step2_open <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01, ex_growth = 0) {
-  n <- calib$n
+This step links macro stocks-flows and IO production. Transition pressure now emerges from model dynamics rather than imposed closure rates.
+
+## Step 4: RoW-lite (Imports and Exports)
+
+### Objective
+
+Add minimal open-economy channels:
+
+-   Exports included in final demand.
+-   Imports represented as sectoral leakage rates.
+-   Track `EX`, `IM`, `TB = EX - IM`.
+
+### Equations
+
+-   `FD_dom,i,t = C_i,t + G_i,t + I_i + EX_i,t`
+-   `IM_i,t = m_i * FD_dom,i,t`
+-   `FD_net,i,t = FD_dom,i,t - IM_i,t`
+-   `x_t = L * FD_net,t`
+
+### What Changed from Step 3
+
+Added explicit RoW-lite accounting. IO-SIM core remains the same.
+
+```{r step4_functions}
+calibrate_sim_iot_row <- function(iot, wealth_init, tau_y = NULL) {
+  tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
+
+  list(
+    base_year = iot$base_year,
+    n = iot$n,
+    sector_codes = iot$sector_codes,
+    sector_labels = iot$sector_labels,
+    L = iot$L0,
+    va_coeff = iot$va_coeff,
+    beta_C = iot$beta_C,
+    beta_G = iot$beta_G,
+    I_i0 = iot$I_i0,
+    EX_i0 = iot$EX_i0,
+    m_i = iot$m_i,
+    G0 = iot$G0,
+    tau_y = tau_guess,
+    V0 = wealth_init$V0,
+    B0 = wealth_init$B0,
+    idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
+  )
+}
+
+simulate_sim_iot_row_lite <- function(calib,
+                                      T = 20,
+                                      c_y = 0.82,
+                                      c_v = 0.03,
+                                      g_G = 0.01,
+                                      ex_growth = 0,
+                                      transition_speed = 0.0015) {
   years <- calib$base_year + seq_len(T) - 1
-  S <- 1 - calib$m_i
 
   out <- data.frame(
     year = years,
-    GDP = numeric(T), TAX = numeric(T), YD = numeric(T),
-    C = numeric(T), G = numeric(T), V = numeric(T),
-    DEF = numeric(T), B = numeric(T),
-    EX = numeric(T), IM = numeric(T), TB = numeric(T)
+    GDP = NA_real_,
+    TAX = NA_real_,
+    YD = NA_real_,
+    C = NA_real_,
+    G = NA_real_,
+    V = NA_real_,
+    DEF = NA_real_,
+    B = NA_real_,
+    EX = NA_real_,
+    IM = NA_real_,
+    TB = NA_real_,
+    betaC_brown = NA_real_,
+    betaC_green = NA_real_
   )
-  x_mat <- matrix(0, nrow = T, ncol = n)
+
+  x_store <- matrix(NA_real_, nrow = T, ncol = calib$n)
 
   V_prev <- calib$V0
   B_prev <- calib$B0
   G_prev <- calib$G0
+  x_prev <- as.numeric(calib$L %*% (calib$beta_C * sum(calib$I_i0) + calib$beta_G * calib$G0 + calib$I_i0 + calib$EX_i0))
 
-  k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * calib$beta_C)))
+  beta_C <- calib$beta_C
+  beta_G <- calib$beta_G
 
-  for (t in seq_len(T)) {
-    G_t <- if (t == 1) calib$G0 else G_prev * (1 + g_G)
-    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(t - 1)
+  for (tt in seq_len(T)) {
+    G_t <- if (tt == 1) calib$G0 else G_prev * (1 + g_G)
+    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(tt - 1)
 
-    other_fd <- calib$beta_G * G_t + calib$I_i0 + EX_i_t
-    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * other_fd)))
+    if (is.finite(calib$idx$idx_green) && is.finite(calib$idx$idx_brown)) {
+      signal <- (x_prev[calib$idx$idx_green] - x_prev[calib$idx$idx_brown]) / pmax(sum(abs(x_prev)), 1)
+      shift <- max(0, transition_speed * (1 + signal))
+      shift <- min(shift, max(beta_C[calib$idx$idx_brown] - 1e-8, 0))
+      beta_C[calib$idx$idx_brown] <- beta_C[calib$idx$idx_brown] - shift
+      beta_C[calib$idx$idx_green] <- beta_C[calib$idx$idx_green] + shift
+    }
+
+    S <- 1 - calib$m_i
+    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * beta_C)))
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * (beta_G * G_t + calib$I_i0 + EX_i_t))))
 
     den <- 1 - c_y * (1 - calib$tau_y) * k
     C_t <- (c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den
     C_t <- max(C_t, 0)
 
-    fd_dom_i <- calib$beta_C * C_t + other_fd
-    im_i <- calib$m_i * fd_dom_i
-    fd_net_i <- pmax(fd_dom_i - im_i, 0)
+    fd_dom_t <- beta_C * C_t + beta_G * G_t + calib$I_i0 + EX_i_t
+    im_i_t <- calib$m_i * fd_dom_t
+    fd_net_t <- pmax(fd_dom_t - im_i_t, 0)
 
-    x_t <- as.numeric(calib$L %*% fd_net_i)
+    x_t <- pmax(as.numeric(calib$L %*% fd_net_t), 0)
     Y_t <- sum(calib$va_coeff * x_t)
-
     TAX_t <- calib$tau_y * Y_t
     YD_t <- Y_t - TAX_t
 
@@ -297,234 +1115,149 @@ simulate_step2_open <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.0
     B_t <- B_prev + DEF_t
 
     EX_t <- sum(EX_i_t)
-    IM_t <- sum(im_i)
+    IM_t <- sum(im_i_t)
     TB_t <- EX_t - IM_t
 
-    out[t, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B", "EX", "IM", "TB")] <-
-      c(Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t, EX_t, IM_t, TB_t)
+    out[tt, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B", "EX", "IM", "TB", "betaC_brown", "betaC_green")] <- c(
+      Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t, EX_t, IM_t, TB_t,
+      if (is.finite(calib$idx$idx_brown)) beta_C[calib$idx$idx_brown] else NA_real_,
+      if (is.finite(calib$idx$idx_green)) beta_C[calib$idx$idx_green] else NA_real_
+    )
 
-    x_mat[t, ] <- x_t
-
+    x_store[tt, ] <- x_t
+    x_prev <- x_t
     V_prev <- V_t
     B_prev <- B_t
     G_prev <- G_t
   }
 
-  list(aggregate = out, x = x_mat)
-}
-
-run_step2_scenarios <- function(calib, T = 20) {
-  specs <- list(
-    baseline = list(g_G = 0.01, c_y = 0.85, c_v = 0.02, ex_growth = 0),
-    fiscal_expansion = list(g_G = 0.03, c_y = 0.85, c_v = 0.02, ex_growth = 0),
-    high_wealth_consumption = list(g_G = 0.01, c_y = 0.85, c_v = 0.06, ex_growth = 0)
-  )
-
-  res <- lapply(names(specs), function(nm) {
-    sp <- specs[[nm]]
-    sim <- simulate_step2_open(calib, T = T, c_y = sp$c_y, c_v = sp$c_v, g_G = sp$g_G, ex_growth = sp$ex_growth)
-    sim$aggregate$scenario <- nm
-    sim
-  })
-  names(res) <- names(specs)
-
-  agg <- do.call(rbind, lapply(res, function(x) x$aggregate))
-  rownames(agg) <- NULL
-  list(by_scenario = res, aggregate = agg)
+  list(aggregate = out, x = x_store)
 }
 ```
 
-```{r step2-run}
-step2 <- run_step2_scenarios(calib, T = 20)
-head(step2$aggregate)
-```
-
-```{r step2-plots, fig.height=4, fig.width=7}
-p1 <- ggplot2::ggplot(step2$aggregate, ggplot2::aes(year, GDP, color = scenario)) +
-  ggplot2::geom_line(linewidth = 1) + ggplot2::theme_minimal() +
-  ggplot2::labs(title = "Step 2: GDP with RoW")
-
-p2 <- ggplot2::ggplot(step2$aggregate, ggplot2::aes(year, TB, color = scenario)) +
-  ggplot2::geom_line(linewidth = 1) + ggplot2::theme_minimal() +
-  ggplot2::labs(title = "Step 2: Trade balance")
-
-print(p1)
-print(p2)
-```
-
-## Step 3: Steady-State Play (scan `c_v`)
-
-```{r step3-function}
-steady_state_play <- function(calib, cv_grid = seq(0, 0.12, by = 0.01), target_window = 5) {
-  out <- data.frame(c_v = cv_grid, avg_gdp_growth_last_window = NA_real_)
-
-  for (i in seq_along(cv_grid)) {
-    sim <- simulate_step2_open(calib, T = 20, c_y = 0.85, c_v = cv_grid[i], g_G = 0.01, ex_growth = 0)
-    gdp <- sim$aggregate$GDP
-    growth <- c(NA_real_, gdp[-1] / gdp[-length(gdp)] - 1)
-    out$avg_gdp_growth_last_window[i] <- mean(tail(growth[is.finite(growth)], target_window))
-  }
-
-  best <- out[which.min(abs(out$avg_gdp_growth_last_window)), , drop = FALSE]
-  list(grid = out, best = best)
+```{r step4_run}
+if (!exists('iot')) {
+  validate_tutorial_config(core_config)
+  iot <- download_or_load_iot(core_config)
 }
-```
-
-```{r step3-run}
-step3 <- steady_state_play(calib, cv_grid = seq(0, 0.12, by = 0.01), target_window = 5)
-step3$grid
-```
-
-```{r step3-best}
-step3$best
-```
-
-## Step 4: Add CO2 (from sector output)
-
-```{r step4-function}
-add_co2 <- function(sim_out, calib) {
-  co2 <- rowSums(sim_out$x * matrix(rep(calib$s_prod, each = nrow(sim_out$x)), nrow = nrow(sim_out$x))) / 1e9
-  out <- sim_out$aggregate
-  out$CO2_Mt <- co2
-  out
+if (!exists('wealth_init')) {
+  wealth_init <- load_wealth_init(core_config)
 }
+calib4 <- calibrate_sim_iot_row(iot, wealth_init)
 
-add_co2_to_step2 <- function(step2_out, calib) {
-  agg_list <- lapply(step2_out$by_scenario, function(sim) {
-    out <- add_co2(sim, calib)
-    out$scenario <- unique(sim$aggregate$scenario)
-    out
-  })
-  agg <- do.call(rbind, agg_list)
-  rownames(agg) <- NULL
-  agg
-}
-```
+step4_baseline <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0)
+step4_transition <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0.003)
 
-```{r step4-run}
-step4_agg <- add_co2_to_step2(step2, calib)
-head(step4_agg)
-```
-
-```{r step4-plot, fig.height=4, fig.width=7}
-ggplot2::ggplot(step4_agg, ggplot2::aes(year, CO2_Mt, color = scenario)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 4: CO2 emissions", y = "Mt CO2") +
-  ggplot2::theme_minimal()
-```
-
-## Step 5: Add Transition (shift brown to green demand)
-
-```{r step5-function}
-simulate_step5_transition <- function(calib, T = 20, c_y = 0.85, c_v = 0.02, g_G = 0.01,
-                                      ex_growth = 0, annual_shift = 0.002, enabled = TRUE) {
-  n <- calib$n
-  years <- calib$base_year + seq_len(T) - 1
-  S <- 1 - calib$m_i
-
-  out <- data.frame(
-    year = years,
-    GDP = numeric(T), C = numeric(T), G = numeric(T),
-    V = numeric(T), B = numeric(T), TB = numeric(T), CO2_Mt = numeric(T),
-    betaC_brown = numeric(T), betaC_green = numeric(T)
-  )
-
-  V_prev <- calib$V0
-  B_prev <- calib$B0
-  G_prev <- calib$G0
-
-  beta_C0 <- calib$beta_C
-  beta_G0 <- calib$beta_G
-
-  x_mat <- matrix(0, nrow = T, ncol = n)
-
-  for (t in seq_len(T)) {
-    G_t <- if (t == 1) calib$G0 else G_prev * (1 + g_G)
-    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(t - 1)
-
-    beta_C_t <- beta_C0
-    beta_G_t <- beta_G0
-
-    if (enabled && is.finite(calib$idx_brown) && is.finite(calib$idx_green)) {
-      shift <- (t - 1) * annual_shift
-      shift_C <- min(shift, max(0, beta_C0[calib$idx_brown] - 1e-8))
-      shift_G <- min(shift, max(0, beta_G0[calib$idx_brown] - 1e-8))
-
-      beta_C_t[calib$idx_brown] <- beta_C0[calib$idx_brown] - shift_C
-      beta_C_t[calib$idx_green] <- beta_C0[calib$idx_green] + shift_C
-
-      beta_G_t[calib$idx_brown] <- beta_G0[calib$idx_brown] - shift_G
-      beta_G_t[calib$idx_green] <- beta_G0[calib$idx_green] + shift_G
-    }
-
-    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * beta_C_t)))
-    other_fd <- beta_G_t * G_t + calib$I_i0 + EX_i_t
-    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * other_fd)))
-
-    den <- 1 - c_y * (1 - calib$tau_y) * k
-    C_t <- (c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den
-    C_t <- max(C_t, 0)
-
-    fd_dom_i <- beta_C_t * C_t + other_fd
-    im_i <- calib$m_i * fd_dom_i
-    fd_net_i <- pmax(fd_dom_i - im_i, 0)
-
-    x_t <- as.numeric(calib$L %*% fd_net_i)
-    Y_t <- sum(calib$va_coeff * x_t)
-    T_t <- calib$tau_y * Y_t
-    YD_t <- Y_t - T_t
-
-    V_t <- V_prev + YD_t - C_t
-    B_t <- B_prev + (G_t - T_t)
-
-    TB_t <- sum(EX_i_t) - sum(im_i)
-    CO2_t <- sum(calib$s_prod * x_t) / 1e9
-
-    out[t, c("GDP", "C", "G", "V", "B", "TB", "CO2_Mt", "betaC_brown", "betaC_green")] <-
-      c(Y_t, C_t, G_t, V_t, B_t, TB_t, CO2_t,
-        if (is.finite(calib$idx_brown)) beta_C_t[calib$idx_brown] else NA_real_,
-        if (is.finite(calib$idx_green)) beta_C_t[calib$idx_green] else NA_real_)
-
-    x_mat[t, ] <- x_t
-
-    V_prev <- V_t
-    B_prev <- B_t
-    G_prev <- G_t
-  }
-
-  list(aggregate = out, x = x_mat)
-}
-```
-
-```{r step5-run}
-baseline_open <- simulate_step5_transition(calib, T = 20, enabled = FALSE)
-green_transition <- simulate_step5_transition(calib, T = 20, enabled = TRUE, annual_shift = 0.002)
-
-compare <- data.frame(
-  year = baseline_open$aggregate$year,
-  CO2_baseline = baseline_open$aggregate$CO2_Mt,
-  CO2_transition = green_transition$aggregate$CO2_Mt,
-  brown_share_baseline = baseline_open$aggregate$betaC_brown,
-  brown_share_transition = green_transition$aggregate$betaC_brown
+step4_compare <- rbind(
+  data.frame(step4_baseline$aggregate, scenario = 'baseline'),
+  data.frame(step4_transition$aggregate, scenario = 'transition')
 )
 
-head(compare)
+step4_compare$tb_check <- step4_compare$EX - step4_compare$IM - step4_compare$TB
+summary(step4_compare$tb_check)
 ```
 
-```{r step5-plot, fig.height=4, fig.width=7}
-ggplot2::ggplot(compare, ggplot2::aes(year)) +
-  ggplot2::geom_line(ggplot2::aes(y = CO2_baseline, color = "baseline"), linewidth = 1) +
-  ggplot2::geom_line(ggplot2::aes(y = CO2_transition, color = "transition"), linewidth = 1) +
-  ggplot2::labs(title = "Step 5: CO2 baseline vs transition", y = "Mt CO2", color = "Scenario") +
+```{r step4_plot, fig.height=4, fig.width=7}
+p4_gdp <- ggplot2::ggplot(step4_compare, ggplot2::aes(year, GDP, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 4: GDP with RoW-lite") +
+  ggplot2::theme_minimal()
+
+p4_tb <- ggplot2::ggplot(step4_compare, ggplot2::aes(year, TB, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 4: Trade balance (TB = EX - IM)") +
+  ggplot2::theme_minimal()
+
+print(p4_gdp)
+print(p4_tb)
+```
+
+### MRIO Caveat (Equations/Text Only)
+
+Not implemented here:
+
+-   In MRIO, imports should use foreign technology matrices, not domestic coefficients.
+-   Domestic-technology assumption for imported consumption can bias embodied-impact interpretation.
+-   National SIOT RoW-lite is fine for pedagogy, but not for full footprint attribution.
+
+## Step 5: AEA Production Emissions
+
+### Objective
+
+Add direct production emissions by sector and compare baseline vs transition paths.
+
+### Equations
+
+-   Production emissions: `E_prod,t = sum_i(s_i * x_i,t)`.
+-   Here `s_i` is fixed direct intensity (`kg CO2 / M EUR`) per sector.
+
+### What Changed from Step 4
+
+Added emissions accounting on top of the RoW-lite IO-SIM model, using a separate emissions calibration set (default: Belgium 2020, industry-by-industry).
+
+```{r step5_functions}
+attach_production_emissions <- function(sim_result, intensity_tbl, sector_codes) {
+  idx <- match(sector_codes, intensity_tbl$sector)
+  s <- intensity_tbl$intensity_kg_per_meur[idx]
+  s[!is.finite(s)] <- 0
+
+  co2_kg <- as.numeric(sim_result$x %*% s)
+  out <- sim_result$aggregate
+  out$CO2_Mt <- co2_kg / 1e9
+  out
+}
+```
+
+```{r step5_run}
+validate_tutorial_config(emissions_config)
+
+iot_emis <- download_or_load_iot(emissions_config)
+wealth_emis <- load_wealth_init(emissions_config)
+
+calib4_emis <- calibrate_sim_iot_row(iot_emis, wealth_emis)
+step5_baseline_sim <- simulate_sim_iot_row_lite(calib4_emis, T = 20, transition_speed = 0)
+step5_transition_sim <- simulate_sim_iot_row_lite(calib4_emis, T = 20, transition_speed = 0.003)
+
+aea_intensity <- load_aea_emissions(emissions_config, iot_emis$sector_codes, iot_emis$x0)
+
+step5_base <- attach_production_emissions(step5_baseline_sim, aea_intensity, iot_emis$sector_codes)
+step5_trans <- attach_production_emissions(step5_transition_sim, aea_intensity, iot_emis$sector_codes)
+
+step5_compare <- rbind(
+  data.frame(step5_base, scenario = "baseline"),
+  data.frame(step5_trans, scenario = "transition")
+)
+
+tail(step5_compare)
+```
+
+```{r step5_plot, fig.height=4, fig.width=7}
+ggplot2::ggplot(step5_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 5: Direct production emissions", y = "Mt CO2") +
   ggplot2::theme_minimal()
 ```
+
+### Consumption-Emissions Caveat (Equations/Text Only)
+
+Not implemented here:
+
+-   Consumption-based footprint requires mapping final-demand baskets to domestic and imported embodied intensities.
+-   In MRIO form: `E_cons,t = e_dom * L_dom * y_dom,t + e_for * L_for * y_imp,t`.
 
 ## Final Snapshot
 
-```{r final-snapshot}
-last_year <- max(step4_agg$year)
-summary_final <- step4_agg[step4_agg$year == last_year, c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
+```{r final_snapshot}
+last_year <- max(step5_compare$year)
+summary_final <- step5_compare[step5_compare$year == last_year,
+                               c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
 summary_final <- summary_final[order(summary_final$scenario), ]
 rownames(summary_final) <- NULL
 summary_final
 ```
+
+## Limitations and Next Step
+
+-   Prices are fixed; no inflation or relative price dynamics.
+-   No inventories, banks, or portfolio choice.
+-   National SIOT + RoW-lite is pedagogical; full trade/footprint analysis requires MRIO extensions.

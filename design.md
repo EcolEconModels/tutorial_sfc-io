@@ -5,6 +5,8 @@ Only after that we'll try to add in Python. So for now, the Python information b
 
 We have a single source, a quarto file tutorial_sfc-io.qmd that build_tutorial.R uses to create html, reveal.js slides, and R and Python code for the tutorial.
 
+The .qmd should specify sections and slides in a user-friendly way, so that the presenter / user can modify and/or add slides or the text on slides.
+
 .qmd file should itself be runnable (both R and Python code) via say github codespace, etc.
 
 R and Python files created as above should match exactly the .qmd code and output when run independently by the user.
@@ -20,7 +22,8 @@ For R files we have a main function, with  `if (!interactive()) {  main() }`, so
     - SIM-current: Have a switch to instead run fixed point iteration to satisfy behavioural consistency with behavioural equations that depend on current time step values (e.g. consumption from current income and from previous wealth), and compare the simulations in the fixed point iteration case with those above in a similar plot.
 
 - Loading IOT and simulate exogeneous energy transition
-    - Load Symmetric IO Table for Austria 2020 industry x industry, total (not just domestic)- use a caching method, if the file is not found then download it.
+    - Allow user to specify the IOT specs at the start: default is Austria 2020 product x product (since idustry x industry is not avalable for 2020), total (not just domestic) flows
+    - Load Symmetric IO Table for above selection, use a caching method, if the file is not found locally in current folder, then download it.
     - For starting values of NACE's 2 energy sectors (I think 19 coal, petroleum et al and 35 electricity, gas and heating), set final values after 20 years for an anergy transition, compute a growth rate for each sector. Set also a growth rate for the total GDP.
     - In the fixed point loop, compute also the domestic demand and A matrix consistent with the closure.
     - Simulate here too for 20 time steps.
@@ -37,5 +40,7 @@ For R files we have a main function, with  `if (!interactive()) {  main() }`, so
     - Point out that exports can be largely attributed to domestic technology and included in final demand.
 
 - Download with caching the Eurostat AEA emissions by NACE to compute direct CO2 emissions by industry
+    - Here we use a different country than Austria, say Germany or Belgium for which industry x industry emissions are availble, since CO2 emissions are available industry x industry.
+    - For this new set, the fitting of the model parameters as per earlier steps, is of course redone.
     - Use intensities to project these emissions of production for domestic demand for the next 20 years under the status quo and the energy transition
     - Point out that these are emissions from production, while those from consumption are extra. Can we use emissions intensities of households to estimate those as well, assuming other domestic consumption is similar to households? Outline using equations, but not in the simulation.
