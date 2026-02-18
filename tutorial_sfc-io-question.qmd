@@ -15,8 +15,6 @@ execute:
   message: false
 ---
 
-This file is the canonical answer tutorial source. The question variant is generated from exercise metadata tags annotations.
-
 ## Shared Setup
 
 Load minimal packages and global options only.
@@ -32,47 +30,87 @@ if (length(missing_packages) > 0) {
 }
 ```
 
-## Step 1: SIM Closed Model
+## Step 1: SIM Closed Model (Chapter 3 of Godley & Lavoie 2012 book)
 
 ### Objective
 
-Build SIM-lag first, then add SIM-current, then compare both against the analytic fixed point.
+Build a simple (SIM) SFC model with Government, Production and Household sectors.
+We see that GDP and Wealth reach a steady state after some time!
+Depending on whether consumption behaviour depends on current year vs previous year income,
+ we need to solve differently
 
 ### Equations
 
-- `Y_t = C_t + G`
-- `T_t = theta * Y_t`
-- `YD_t = Y_t - T_t`
-- `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}`
-- `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}`
-- `H_t = H_{t-1} + YD_t - C_t`
-- `Y* = G / theta`
+- Output identity `Y_t = C_t + G_t`
+- Wages `W_t = omega * Y_t`
+- Profits `Pi_t = Y_t - W_t`
+- Distributed profits `Pi^d_t = lambda_pi * Pi_t` (baseline in Step 1: `lambda_pi = 1`)
+- Taxes `T_t = theta * (W_t + Pi^d_t)`
+- Household Disposable Income `YD_t = W_t + Pi^d_t - T_t`
+- Consumption `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}` , (assume based on last year's income, SIM-lag)
+- Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` , (assume based on current year's income, SIM-current)
+- Household Wealth / change in wealth `H_t = H_{t-1} + YD_t - C_t`
+- Government deficit/debt: `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
+- Fixed point of GDP in this baseline (`lambda_pi = 1`): `Y* = G / theta`
+
+Balance Sheet Matrix (BSM, simplified SIM view):
+
+|                 | Households | Government | Production | Sum |
+|---|---:|---:|---:|---:|
+| Government bills / money `H (=B)` | `+H` | `-B` | `0` | `0` |
+| Net worth              | `V_h` | `V_g` | `V_p` | `0` |
+
+Transaction Flow Matrix (TFM, one period, sign by sector column):
+
+| Flow | Households | Government | Production | Sum |
+|---|---:|---:|---:|---:|
+| Wages `W` | `+W` | `0` | `-W` | `0` |
+| Distributed profits `Pi^d` | `+Pi^d` | `0` | `-Pi^d` | `0` |
+| Taxes `T` | `-T` | `+T` | `0` | `0` |
+| Consumption `C` | `-C` | `0` | `+C` | `0` |
+| Government demand `G` | `0` | `-G` | `+G` | `0` |
+
+From column sums:
+- Households: `Delta H = YD - C = W + Pi^d - T - C`
+- Government: `Delta B = G - T`
+- Production: `Y = C + G = W + Pi^d`
 
 Steady-state derivation (SIM):
-- At steady state, stocks are constant: `H_t = H_{t-1}` so `0 = YD - C`, hence `C = YD = (1-theta)Y`.
-- Goods market: `Y = C + G = (1-theta)Y + G`.
-- Rearranging: `theta * Y = G`, so `Y* = G / theta`.
-- From behavior at steady state: `C = alpha1*(1-theta)Y + alpha2*H` and `C = (1-theta)Y`.
+- This derivation uses the Step 1 baseline closure `lambda_pi = 1`, so household pre-tax income is `W + Pi^d = Y`.
+- At steady state, stocks are constant: `H_t = H_{t-1} = H*` so `0 = YD* - C*`, hence `C* = YD* = (1-theta)Y*`.
+- GDP: `Y* = C* + G = (1-theta)Y* + G*`.
+- Rearranging: `theta * Y* = G`, so `Y* = G / theta`.
+- From behavior at steady state: `C* = alpha1*(1-theta)Y* + alpha2*H*` and `C* = (1-theta)Y*`.
 - Therefore: `H* = ((1-alpha1)*(1-theta)/alpha2) * Y* = ((1-alpha1)*(1-theta)/alpha2) * (G/theta)`.
-- This fixed-point GDP is independent of `alpha1` and `alpha2`; those affect only transition dynamics.
+- The fixed-point GDP `Y*` is independent of `alpha1` and `alpha2`; those affect only transition dynamics.
 
-Define fixed point and lag simulation.
+SIM-lag is easy to simulate, since all updates depend on previous year's values, so no circular depndencies
 
 Define the SIM-lag dynamics as a simple time loop.
-Consumption depends on lagged disposable income and past wealth.
-The function returns a tidy time-series for plotting and comparisons.
+Consumption `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}` depends on lagged disposable income and past wealth.
+The function simulates the dynamics for time steps `T` (years), and returns a time-series for plotting and comparisons.
 ```{r step1_functions_sim_core}
-simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2, Y0 = 80, H0 = 300) {
-  out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
-  YD_prev <- (1 - theta) * Y0
+simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
+                             omega = 0.75, lambda_pi = 1, Y0 = 80, H0 = 300) {
+  out <- data.frame(t = seq_len(T), Y = NA_real_, W = NA_real_, Pi = NA_real_, Pi_d = NA_real_,
+                    T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
+  W0 <- omega * Y0
+  Pi0 <- Y0 - W0
+  Pi_d0 <- lambda_pi * Pi0
+  T0 <- theta * (W0 + Pi_d0)
+  YD_prev <- W0 + Pi_d0 - T0
   H_prev <- H0
   for (tt in seq_len(T)) {
     C_t <- alpha1 * YD_prev + alpha2 * H_prev
     Y_t <- C_t + G
-    T_t <- theta * Y_t
-    YD_t <- Y_t - T_t
+    W_t <- omega * Y_t
+    Pi_t <- Y_t - W_t
+    Pi_d_t <- lambda_pi * Pi_t
+    T_t <- theta * (W_t + Pi_d_t)
+    YD_t <- W_t + Pi_d_t - T_t
     H_t <- H_prev + YD_t - C_t
-    out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
+    out[tt, c("Y", "W", "Pi", "Pi_d", "T_tax", "YD", "C", "H")] <-
+      c(Y_t, W_t, Pi_t, Pi_d_t, T_t, YD_t, C_t, H_t)
     YD_prev <- YD_t
     H_prev <- H_t
   }
@@ -80,67 +118,49 @@ simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 
 }
 ```
 
-Run SIM-lag from below steady state.
+Run SIM-lag from intial values that are below the steady state.
 
 Set baseline SIM parameters and compute the fixed point Y*.
 Choose an initial GDP below Y* and derive a consistent H0.
 Run the lag model to generate the convergence path.
 ```{r step1_run_lag_below}
-T_h <- 20
-G <- 100
-theta <- 0.2
-alpha1 <- 0.6
-alpha2 <- 0.2
+T_h <- 40 # time horizon
+G <- 100  # government spending per year
+theta <- 0.2 # tax rate
+alpha1 <- 0.6 # fraction consumption out of income
+alpha2 <- 0.2 # fraction consumption out of wealth
+omega <- 0.75 # wage share in output
+lambda_pi <- 1 # share of profits distributed to households
+# fixed points for GDP and wealth
 Y_star <- G / theta
+H_star <- ((1 - alpha1) * (1 - theta) * Y_star) / alpha2
+# setting Y0 below the fixed point, try above as well!
 Y0_low <- 0.7 * Y_star
+# setting H0 consistent with Y0, try something else, e.g. 0.0 as well!
 H0_low <- (Y0_low * (1 - alpha1 * (1 - theta)) - G) / alpha2
-lag_low <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
-```
-
-Plot lag path from below.
-
-Plot the GDP path from the lag model.
-Overlay the analytic fixed point as a horizontal reference.
-This visualizes convergence from below.
-```{r step1_plot_lag_below, fig.height=4, fig.width=7}
-yr <- range(c(lag_low$Y, Y_star), na.rm = TRUE)
-pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
-plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
-     ylim = c(yr[1] - pad, yr[2] + pad),
-     xlab = "t", ylab = "GDP", main = "Step 1A: SIM-lag from below fixed point")
-abline(h = Y_star, lty = 2)
-```
-
-Core play: start above steady state and compare.
-
-Change the initial GDP to start above the fixed point.
-Compute the consistent H0 and rerun the lag model.
-Plot below/above paths together to compare convergence.
-```{r step1_play_core_lag_above}
-Y0_high_play <- 1.1 * Y_star  # TODO [core:step1_high_start] Start GDP above fixed point and compare convergence Hint: Try 1.1, 1.3, then 1.6 times Y*
+# also define above-fixed-point initial values for comparison plots
+Y0_high_play <- 1.3 * Y_star
 H0_high_play <- (Y0_high_play * (1 - alpha1 * (1 - theta)) - G) / alpha2
-lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
-
-yr <- range(c(lag_low$Y, lag_high_play$Y, Y_star), na.rm = TRUE)
-pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
-plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
-     ylim = c(yr[1] - pad, yr[2] + pad),
-     xlab = "t", ylab = "GDP", main = "Step 1B: SIM-lag from below and above")
-lines(lag_high_play$t, lag_high_play$Y, lwd = 2, col = "firebrick")
-abline(h = Y_star, lty = 2)
-legend("right", legend = c("below start", "above start", "Y*"),
-       col = c("steelblue", "firebrick", "black"), lty = c(1, 1, 2), bty = "n")
+lag_low <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2,
+                            omega = omega, lambda_pi = lambda_pi, Y0 = Y0_low, H0 = H0_low)
+lag_low$DEF <- G - lag_low$T_tax
+lag_low$H_from_DEF <- H0_low + cumsum(lag_low$DEF)
 ```
 
-Now add SIM-current fixed-point simulation.
+
+SIM-current is not so easy to simulate, since updates are circular!
+Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` depends on current disposable income and past wealth.
+Current disposable income `YD_t` depends on current output and distribution assumptions.
 
 Define SIM-current with within-period fixed-point iteration.
 Each period solves Y from current disposable income and wealth.
 This makes income–consumption contemporaneous instead of lagged.
 ```{r step1_functions_sim_current}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
+                                    omega = 0.75, lambda_pi = 1,
                                     Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
-  out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
+  out <- data.frame(t = seq_len(T), Y = NA_real_, W = NA_real_, Pi = NA_real_, Pi_d = NA_real_,
+                    T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
   H_prev <- H0
   Y_prev <- Y0
   for (tt in seq_len(T)) {
@@ -148,16 +168,26 @@ simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, 
     n_iter <- 0L
     repeat {
       n_iter <- n_iter + 1L
-      Y_new <- G + alpha1 * (1 - theta) * Y_guess + alpha2 * H_prev
+      W_guess <- omega * Y_guess
+      Pi_guess <- Y_guess - W_guess
+      Pi_d_guess <- lambda_pi * Pi_guess
+      T_guess <- theta * (W_guess + Pi_d_guess)
+      YD_guess <- W_guess + Pi_d_guess - T_guess
+      C_guess <- alpha1 * YD_guess + alpha2 * H_prev
+      Y_new <- G + C_guess
       if (abs(Y_new - Y_guess) < fp_tol || n_iter >= fp_max) break
       Y_guess <- Y_new
     }
     Y_t <- Y_new
-    T_t <- theta * Y_t
-    YD_t <- Y_t - T_t
-    C_t <- Y_t - G
+    W_t <- omega * Y_t
+    Pi_t <- Y_t - W_t
+    Pi_d_t <- lambda_pi * Pi_t
+    T_t <- theta * (W_t + Pi_d_t)
+    YD_t <- W_t + Pi_d_t - T_t
+    C_t <- alpha1 * YD_t + alpha2 * H_prev
     H_t <- H_prev + YD_t - C_t
-    out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
+    out[tt, c("Y", "W", "Pi", "Pi_d", "T_tax", "YD", "C", "H")] <-
+      c(Y_t, W_t, Pi_t, Pi_d_t, T_t, YD_t, C_t, H_t)
     H_prev <- H_t
     Y_prev <- Y_t
   }
@@ -171,8 +201,10 @@ Run SIM-current from below and above the fixed point.
 Plot lag and current dynamics together for comparison.
 This shows how timing assumptions affect transients.
 ```{r step1_run_compare_lag_current}
-cur_low <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
-cur_high <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
+lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2,
+                              omega = omega, lambda_pi = lambda_pi, Y0 = Y0_high_play, H0 = H0_high_play)
+cur_low <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, omega = omega, lambda_pi = lambda_pi, Y0 = Y0_low, H0 = H0_low)
+cur_high <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, omega = omega, lambda_pi = lambda_pi, Y0 = Y0_high_play, H0 = H0_high_play)
 
 yr <- range(c(lag_low$Y, lag_high_play$Y, cur_low$Y, cur_high$Y, Y_star), na.rm = TRUE)
 pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
@@ -196,8 +228,8 @@ Plot the impact on speed of convergence.
 ```{r step1_play_optional_alpha2}
 alpha2_play <- 0.1  # TODO [optional:step1_alpha2] Change alpha2 and compare speed of convergence Hint: Lower alpha2 usually slows wealth-driven demand
 
-lag_opt <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
-cur_opt <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
+lag_opt <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, omega = omega, lambda_pi = lambda_pi, Y0 = Y0_low, H0 = H0_low)
+cur_opt <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, omega = omega, lambda_pi = lambda_pi, Y0 = Y0_low, H0 = H0_low)
 
 plot(lag_opt$t, lag_opt$Y, type = "l", lwd = 2, col = "steelblue",
      xlab = "t", ylab = "GDP", main = "Step 1 Optional: effect of alpha2")

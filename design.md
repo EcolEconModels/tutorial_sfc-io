@@ -24,6 +24,8 @@ We want the following progressive steps in the tutorial. Each is a separate sect
 For R files we have a main function, with  `if (!interactive()) {  main() }`, so that `source`-ing the file into a later step/section won't run the code and plots already explored/seen in the previous step.
 
 - Introduce and simulate a closed minimal SFC model: SIM (simple) model from Godley and Lavoie book
+    - Show Balance Sheet Matrix (BSM) and Transaction Flow Matrix (TFM) for Government, Production and Households before running simulations.
+    - Make wages and distributed profits explicit (wage share in output; distributed-profit share as a parameter).
     - Derive steady state equation for GDP
     - SIM-lag: Use behavioural equations that only depend on previous time step values. Plot GDP from initial value higher and lower than steady state, versus time - 20 years with yearly time step, to see if it reaches the steady state value.
     - SIM-current: Have a switch to instead run fixed point iteration to satisfy behavioural consistency with behavioural equations that depend on current time step values (e.g. consumption from current income and from previous wealth), and compare the simulations in the fixed point iteration case with those above in a similar plot.
@@ -115,6 +117,7 @@ Question variant generation principle:
 5. Every step section in `.qmd` must follow:
    - Objective slide
    - Equations slide
+   - BSM/TFM slide(s) to link stock positions with transaction flows
    - Easily digestible code-call slide(s)
    - Output/plot slide
    - Play slide that specifies what parameters to play with
