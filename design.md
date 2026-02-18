@@ -162,7 +162,7 @@ The tutorial must run reliably through three paths:
 
 The following decisions are additive and do not remove prior scope/content decisions.
 
-1. Tutorial structure is now six standalone step tutorials:
+1. Tutorial structure is six standalone step tutorials:
    - `steps/step01_sim.qmd`
    - `steps/step02_sim_iot_fit.qmd`
    - `steps/step03_endogenous_transition.qmd`
@@ -170,41 +170,46 @@ The following decisions are additive and do not remove prior scope/content decis
    - `steps/step05_exogenous_transition.qmd`
    - `steps/step06_emissions.qmd`
 
-2. The repository root `tutorial_sfc-io.qmd` is now an index/entry page linking standalone step tutorials and build commands.
+2. The repository root `tutorial_sfc-io.qmd` is an index/entry page linking standalone step tutorials and build commands.
 
 3. Matrix pedagogy order is fixed everywhere to:
    - **TFM first**
    - **BSM second**
 
 4. Step excerpt policy:
-   - A step should show only code newly introduced for that step.
-   - If a helper was introduced earlier, later steps should source it and reference the earlier step instead of re-explaining full helper code.
-   - Step pages now keep helper internals in `R/helpers/` and show only step-owned simulation/scenario code in the visible tutorial excerpts.
+   - A step shows only code newly introduced for that step.
+   - If a helper was introduced earlier, later steps source it and reference the earlier step.
+   - When helpers are first introduced, each step must include short explanatory excerpts of the helper logic used in that step.
 
-5. Dual-source architecture is adopted:
-   - Step narratives/simulations in step `.qmd` files.
-   - Shared loading/parsing/calibration helpers in `R/helpers/`.
+5. Dynamics ownership policy (locked):
+   - No core simulation/dynamics loops in shared helper files.
+   - Step 2 has a baseline-only SIM+IOT dynamics function (no transition mechanism).
+   - Step 3 has a separate endogenous-transition dynamics function.
+   - Step 5 has a separate exogenous-closure transition dynamics function.
 
-6. Shared helper files currently used:
+6. Dual-source architecture is adopted:
+   - Step narratives and simulation algorithms live in step `.qmd` files.
+   - Shared helpers in `R/helpers/` are restricted to loading, parsing, calibration, and emissions-alignment utilities.
+
+7. Shared helper files currently used:
    - `R/helpers/cache_io.R`
    - `R/helpers/jsonstat_parse.R`
    - `R/helpers/iot_load.R`
    - `R/helpers/config_wealth.R`
    - `R/helpers/calibration.R`
    - `R/helpers/emissions_load.R`
-   - `R/helpers/shared_dynamics.R`
 
-7. Step-standalone behavior:
-   - Each step qmd must run from a clean R session by sourcing required helper files.
+8. Step-standalone behavior:
+   - Each step qmd runs from a clean R session by sourcing required helper files.
    - Standalone means executable independently, even if explanatory references point to earlier steps.
 
-8. Build and generation are step-based:
+9. Build and generation are step-based:
    - `Rscript build_tutorial.R --generate-question-steps`
    - `Rscript build_tutorial.R --generate-r-steps-answer --generate-r-steps-question`
    - `Rscript build_tutorial.R --check-step-sync`
    - `Rscript build_tutorial.R --render-html`
 
-9. GitHub Pages target structure:
+10. GitHub Pages target structure:
    - `docs/index.html` landing page
    - `docs/answer/step01.html` ... `docs/answer/step06.html`
    - `docs/question/step01.html` ... `docs/question/step06.html`

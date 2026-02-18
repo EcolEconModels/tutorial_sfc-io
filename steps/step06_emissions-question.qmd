@@ -59,6 +59,36 @@ It sets country/year/table choices for emission-intensity alignment and loading.
 emissions_config <- make_emissions_config()
 ```
 
+### Helper Excerpts (First Introduction)
+
+Step 6 is the first time emissions helpers are used.  
+We keep full implementations in `R/helpers/emissions_load.R` and show key excerpts so participants can follow the alignment logic.
+
+NACE-code normalization and alignment:
+
+```r
+normalize_nace_code <- function(x) {
+  y <- toupper(as.character(x))
+  y <- gsub("-", "_", y)
+  y <- gsub("\\.", "", y)
+  y
+}
+
+align_iot_to_aea <- function(iot, cfg) {
+  aea_norm <- get_aea_codes(cfg)
+  keep <- normalize_nace_code(iot$sector_codes) %in% aea_norm
+  # keep only sectors that exist in both IO and AEA classifications
+}
+```
+
+Intensity construction and aggregation:
+
+```r
+intensity <- (em_ths_t * 1e6) / pmax(as.numeric(x0), 1e-9)
+co2_kg <- as.numeric(sim_result$x %*% intensity_vector)
+CO2_Mt <- co2_kg / 1e9
+```
+
 Define Step 6 simulation wrapper with stored sector output.
 
 Algorithm: run the RoW-lite macro loop while storing sectoral output vectors `x_t` each period.

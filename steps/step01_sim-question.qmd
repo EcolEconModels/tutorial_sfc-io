@@ -15,9 +15,8 @@ execute:
 
 Load minimal packages and global options only.
 
-Check that required packages are installed.
-Stop early with a clear error if anything is missing.
-This keeps the tutorial run deterministic and minimal.
+Check that required packages are installed. Stop early with a clear error if anything is missing. This keeps the tutorial run deterministic and minimal.
+
 ```{r setup_packages}
 required_packages <- c("jsonlite", "ggplot2")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
@@ -26,61 +25,48 @@ if (length(missing_packages) > 0) {
 }
 ```
 
-
 ## Step 1: SIM Closed Model (Chapter 3 of Godley & Lavoie 2012 book)
 
 ### Objective
 
-Build a simple (SIM) SFC model with Government, Production and Household sectors.
-We see that GDP and Wealth reach a steady state after some time!
-Depending on whether consumption behaviour depends on current year vs previous year income,
- we need to solve differently
+Build a simple (SIM) SFC model with Government, Production and Household sectors. We see that GDP and Wealth reach a steady state after some time! Depending on whether consumption behaviour depends on current year vs previous year income, we need to solve differently
 
 ### Equations
 
-- Output identity `Y_t = C_t + G_t`
-- Taxes `T_t = theta * Y_t`
-- Household Disposable Income `YD_t = Y_t - T_t`
-- Consumption `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}` , (assume based on last year's income, SIM-lag)
-- Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` , (assume based on current year's income, SIM-current)
-- Household Wealth / change in wealth `H_t = H_{t-1} + YD_t - C_t`
-- Government deficit/debt: `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
-- Fixed point of GDP: `Y* = G / theta`
+-   Output identity `Y_t = C_t + G_t`
+-   Wages `W_t = Y_t` , combining wages and profits as wages to households
+-   Taxes `T_t = theta * Y_t`
+-   Household Disposable Income `YD_t = Y_t - T_t`
+-   Consumption `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}` , (assume based on last year's income, SIM-lag)
+-   Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` , (assume based on current year's income, SIM-current)
+-   Household Wealth / change in wealth `H_t = H_{t-1} + YD_t - C_t`
+-   Government deficit/debt: `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
+-   Fixed point of GDP: `Y* = G / theta`
 
 Transaction Flow Matrix (TFM, one period, sign by sector column):
 
-| Flow | Households | Government | Production | Sum |
-|---|---:|---:|---:|---:|
-| Wages / income `Y` | `+Y` | `0` | `-Y` | `0` |
-| Taxes `T` | `-T` | `+T` | `0` | `0` |
-| Consumption `C` | `-C` | `0` | `+C` | `0` |
-| Government demand `G` | `0` | `-G` | `+G` | `0` |
+| Flow                  | Households | Government | Production | Sum |
+|-----------------------|-----------:|-----------:|-----------:|----:|
+| Wages / income `Y`    |       `+Y` |        `0` |       `-Y` | `0` |
+| Taxes `T`             |       `-T` |       `+T` |        `0` | `0` |
+| Consumption `C`       |       `-C` |        `0` |       `+C` | `0` |
+| Government demand `G` |        `0` |       `-G` |       `+G` | `0` |
 
-From column sums:
-- Households: `Delta H = YD - C = Y - T - C`
-- Government: `Delta B = G - T`
-- Production: `Y = C + G`
+From column sums: - Households: `Delta H = YD - C = Y - T - C` - Government: `Delta B = G - T` - Production: `Y = C + G`
 
 Balance Sheet Matrix (BSM, simplified SIM view):
 
-|                 | Households | Government | Production | Sum |
-|---|---:|---:|---:|---:|
-| Government bills / money `H (=B)` | `+H` | `-B` | `0` | `0` |
-| Net worth              | `V_h` | `V_g` | `V_p` | `0` |
+|                                   | Households | Government | Production | Sum |
+|-----------------------------------|-----------:|-----------:|-----------:|----:|
+| Government bills / money `H (=B)` |       `+H` |       `-B` |        `0` | `0` |
+| Net worth                         |      `V_h` |      `V_g` |      `V_p` | `0` |
 
-Steady-state derivation (SIM):
-- At steady state, stocks are constant: `H_t = H_{t-1} = H*` so `0 = YD* - C*`, hence `C* = YD* = (1-theta)Y*`.
-- GDP: `Y* = C* + G = (1-theta)Y* + G*`.
-- Rearranging: `theta * Y* = G`, so `Y* = G / theta`.
-- From behavior at steady state: `C* = alpha1*(1-theta)Y* + alpha2*H*` and `C* = (1-theta)Y*`.
-- Therefore: `H* = ((1-alpha1)*(1-theta)/alpha2) * Y* = ((1-alpha1)*(1-theta)/alpha2) * (G/theta)`.
-- The fixed-point GDP `Y*` is independent of `alpha1` and `alpha2`; those affect only transition dynamics.
+Steady-state derivation (SIM): - At steady state, stocks are constant: `H_t = H_{t-1} = H*` so `0 = YD* - C*`, hence `C* = YD* = (1-theta)Y*`. - GDP: `Y* = C* + G = (1-theta)Y* + G*`. - Rearranging: `theta * Y* = G`, so `Y* = G / theta`. - From behavior at steady state: `C* = alpha1*(1-theta)Y* + alpha2*H*` and `C* = (1-theta)Y*`. - Therefore: `H* = ((1-alpha1)*(1-theta)/alpha2) * Y* = ((1-alpha1)*(1-theta)/alpha2) * (G/theta)`. - The fixed-point GDP `Y*` is independent of `alpha1` and `alpha2`; those affect only transition dynamics.
 
 SIM-lag is easy to simulate, since all updates depend on previous year's values, so no circular depndencies
 
-Define the SIM-lag dynamics as a simple time loop.
-Consumption `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}` depends on lagged disposable income and past wealth.
-The function simulates the dynamics for time steps `T` (years), and returns a time-series for plotting and comparisons.
+Define the SIM-lag dynamics as a simple time loop. Consumption `C_t(lag) = alpha1 * YD_{t-1} + alpha2 * H_{t-1}` depends on lagged disposable income and past wealth. The function simulates the dynamics for time steps `T` (years), and returns a time-series for plotting and comparisons.
+
 ```{r step1_functions_sim_core}
 simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2, Y0 = 80, H0 = 300) {
   out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
@@ -102,9 +88,8 @@ simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 
 
 Run SIM-lag from intial values that are below the steady state.
 
-Set baseline SIM parameters and compute the fixed point Y*.
-Choose an initial GDP below Y* and derive a consistent H0.
-Run the lag model to generate the convergence path.
+Set baseline SIM parameters and compute the fixed point Y*. Choose an initial GDP below Y* and derive a consistent H0. Run the lag model to generate the convergence path.
+
 ```{r step1_run_lag_below}
 T_h <- 40 # time horizon
 G <- 100  # government spending per year
@@ -126,14 +111,10 @@ lag_low$DEF <- G - lag_low$T_tax
 lag_low$H_from_DEF <- H0_low + cumsum(lag_low$DEF)
 ```
 
+SIM-current is not so easy to simulate, since updates are circular! Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` depends on current disposable income and past wealth. Current disposable income `YD_t` depends on current output.
 
-SIM-current is not so easy to simulate, since updates are circular!
-Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` depends on current disposable income and past wealth.
-Current disposable income `YD_t` depends on current output.
+Define SIM-current with within-period fixed-point iteration. Each period solves Y from current disposable income and wealth. This makes income–consumption contemporaneous instead of lagged.
 
-Define SIM-current with within-period fixed-point iteration.
-Each period solves Y from current disposable income and wealth.
-This makes income–consumption contemporaneous instead of lagged.
 ```{r step1_functions_sim_current}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
                                     Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
@@ -164,9 +145,8 @@ simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, 
 
 Compare lag and current dynamics.
 
-Run SIM-current from below and above the fixed point.
-Plot lag and current dynamics together for comparison.
-This shows how timing assumptions affect transients.
+Run SIM-current from below and above the fixed point. Plot lag and current dynamics together for comparison. This shows how timing assumptions affect transients.
+
 ```{r step1_run_compare_lag_current}
 lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
 cur_low <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
@@ -188,9 +168,8 @@ legend("right", legend = c("Lag below", "Lag above", "Current below", "Current a
 
 Optional play: adjust wealth propensity in both variants.
 
-Vary the propensity to consume out of wealth (alpha2).
-Rerun both lag and current versions with the new alpha2.
-Plot the impact on speed of convergence.
+Vary the propensity to consume out of wealth (alpha2). Rerun both lag and current versions with the new alpha2. Plot the impact on speed of convergence.
+
 ```{r step1_play_optional_alpha2}
 alpha2_play <- 0.1  # TODO [optional:step1_alpha2] Change alpha2 and compare speed of convergence Hint: Lower alpha2 usually slows wealth-driven demand
 

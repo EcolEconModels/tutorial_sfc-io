@@ -28,7 +28,8 @@ if (length(missing_packages) > 0) {
 
 ### Dependency Context
 
-This step is standalone: it sources only the helper modules needed for SIM+IOT fitting and simulation.
+This step is standalone: it sources only shared loaders/parsers/calibration helpers.
+Dynamics are defined in this step file (not in helpers).
 
 ```{r source_helpers}
 helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
@@ -37,7 +38,6 @@ source(file.path(helper_dir, 'jsonstat_parse.R'))
 source(file.path(helper_dir, 'iot_load.R'))
 source(file.path(helper_dir, 'config_wealth.R'))
 source(file.path(helper_dir, 'calibration.R'))
-source(file.path(helper_dir, 'shared_dynamics.R'))
 ```
 
 ## Step 2: SIM + IOT Baseline Fit
@@ -73,11 +73,51 @@ Integrate SIM stocks-flows with IOT production, fit to base-year data, and simul
 
 Step 2 change vs Step 1: production is mapped through the IOT (`x = Lf`), while stock-flow closure remains the SIM wealth/debt core.
 
+### Helper Excerpts (First Introduction)
+
+These helpers are first used here. We keep full helper code in `R/helpers/`, and show excerpts so participants see the exact algorithmic logic.
+
+Cache/download helper (`R/helpers/cache_io.R`): build deterministic query URLs, cache JSON locally, and reuse cache on reruns.
+
+```r
+fetch_eurostat_json <- function(dataset_id, params, cache_dir = "data") {
+  cache_file <- cache_file_for_query(dataset_id, params, cache_dir)
+  if (file.exists(cache_file)) return(jsonlite::read_json(cache_file, simplifyVector = FALSE))
+  url <- paste0(base, "/", dataset_id, "?", paste(build_query_parts(params), collapse = "&"))
+  utils::download.file(url, destfile = cache_file, mode = "wb", quiet = TRUE)
+  jsonlite::read_json(cache_file, simplifyVector = FALSE)
+}
+```
+
+JSON-stat parser excerpt (`R/helpers/jsonstat_parse.R`): decode sparse Eurostat values into a dense matrix with ordered row/column categories.
+
+```r
+extract_matrix_from_json <- function(js, row_dim, col_dim) {
+  row_cat <- ordered_categories(js[["dimension"]][[row_dim]])
+  col_cat <- ordered_categories(js[["dimension"]][[col_dim]])
+  M <- matrix(NA_real_, nrow = nrow(row_cat), ncol = nrow(col_cat))
+  for (j in seq_along(flat_idx)) {
+    pos <- decode_jsonstat_index(flat_idx[j], sizes)
+    M[pos[row_i] + 1L, pos[col_i] + 1L] <- as.numeric(vals[[j]])
+  }
+  list(M = M, row_cat = row_cat, col_cat = col_cat)
+}
+```
+
+IOT calibration excerpt (`R/helpers/iot_load.R`): extract `Z`, compute `A`, invert for `L`, and build base demand/value-added vectors.
+
+```r
+Z <- mat$M[r_idx, c_idx, drop = FALSE]
+A0 <- sweep(Z, 2, pmax(x0, 1e-9), '/')
+L0 <- solve(diag(length(sector_codes)) - A0 + diag(1e-8, length(sector_codes)))
+C_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c('^P3_S14$', 'households'))
+G_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c('^P3_S13$', 'government'))
+va_coeff <- as.numeric(mat$M[va_row[1], c_idx, drop = TRUE]) / pmax(x0, 1e-9)
+```
+
 ### Configuration and Fit Workflow
 
 Declare one core data configuration and keep it consistent across loading, wealth initialization, and calibration.
-The helper modules (introduced in this step) perform three tasks: IO download/parse, wealth loading, and SIM+IOT calibration.
-The simulation function used below is `simulate_sim_iot_endogenous()` from `R/helpers/shared_dynamics.R`.
 
 ```{r step2_run_config}
 core_config <- make_core_config()
@@ -98,28 +138,75 @@ if (!exists("core_wealth", inherits = FALSE) || !is.list(core_wealth) || !all(c(
 calib3 <- calibrate_sim_iot(core_iot, core_wealth)
 ```
 
-Run 20-year baseline simulation (no endogenous transition).
+Define Step 2 baseline dynamics (no transition in this step).
 
-Transition speed is fixed to zero to isolate the fitted baseline dynamics.
-This gives the no-transition reference path used in Step 3 comparisons.
+This is the Step 2 algorithm to be learned: fiscal + household behavior + IO production, without any energy-share reallocation term.
+`C_t` is solved each period from the reduced form, then mapped to sector output via `L`.
+```{r step2_functions_baseline}
+simulate_sim_iot_baseline <- function(calib,
+                                      T = 20,
+                                      c_y = 0.82,
+                                      c_v = 0.03,
+                                      g_G = 0.01) {
+  years <- calib$base_year + seq_len(T) - 1
+  out <- data.frame(
+    year = years,
+    GDP = NA_real_, TAX = NA_real_, YD = NA_real_, C = NA_real_, G = NA_real_,
+    V = NA_real_, DEF = NA_real_, B = NA_real_
+  )
+
+  V_prev <- calib$V0
+  B_prev <- calib$B0
+  G_prev <- calib$G0
+
+  for (tt in seq_len(T)) {
+    G_t <- if (tt == 1) calib$G0 else G_prev * (1 + g_G)
+
+    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% calib$beta_C))
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (calib$beta_G * G_t + calib$I_i0)))
+    den <- 1 - c_y * (1 - calib$tau_y) * k
+    C_t <- max((c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den, 0)
+
+    fd_t <- calib$beta_C * C_t + calib$beta_G * G_t + calib$I_i0
+    x_t <- pmax(as.numeric(calib$L %*% fd_t), 0)
+    Y_t <- sum(calib$va_coeff * x_t)
+    TAX_t <- calib$tau_y * Y_t
+    YD_t <- Y_t - TAX_t
+
+    V_t <- V_prev + YD_t - C_t
+    DEF_t <- G_t - TAX_t
+    B_t <- B_prev + DEF_t
+
+    out[tt, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B")] <- c(Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t)
+
+    V_prev <- V_t
+    B_prev <- B_t
+    G_prev <- G_t
+  }
+
+  out
+}
+```
+
+Run 20-year baseline simulation.
+
+This is the no-transition baseline used for Step 3 comparisons.
 ```{r step2_run_baseline}
-step2_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
+step2_baseline <- simulate_sim_iot_baseline(calib3, T = 20)
 ```
 
 Core play: fiscal stance in baseline (no transition).
 
-Change government spending growth while keeping transition switched off.
-Compare output and debt trajectories against the baseline.
+Change government spending growth and compare output/debt paths.
 ```{r step2_play_core_fiscal}
 g_G_play <- 0.00  # TODO [core:step2_gG] Change baseline government spending growth and compare GDP/debt paths Hint: Try 0.00, 0.01, 0.03
-step2_core_play <- simulate_sim_iot_endogenous(calib3, T = 20, g_G = g_G_play, transition_speed = 0)
+step2_core_play <- simulate_sim_iot_baseline(calib3, T = 20, g_G = g_G_play)
 ```
 
 Plot Step 2 core comparison.
 
 Left panel: GDP baseline vs play.
 Right panel: government debt baseline vs play.
-Read both together as macro-output versus fiscal-stock trade-off.
 ```{r step2_plot_core, fig.height=4, fig.width=7}
 par(mfrow = c(1, 2))
 plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
@@ -134,11 +221,10 @@ par(mfrow = c(1, 1))
 
 Optional play: baseline wealth-consumption behavior.
 
-Change consumption out of wealth with transition still off.
-Inspect how the household wealth path changes under the new behavioral setting.
+Change consumption out of wealth and inspect the wealth path.
 ```{r step2_play_optional_cv}
-c_v_baseline_play <- 0.01  # TODO [optional:step2_cv] Change baseline c_v and inspect wealth and GDP without transition Hint: Keep transition_speed = 0
-step2_opt <- simulate_sim_iot_endogenous(calib3, T = 20, c_v = c_v_baseline_play, transition_speed = 0)
+c_v_baseline_play <- 0.01  # TODO [optional:step2_cv] Change baseline c_v and inspect wealth and GDP without transition Hint: Keep baseline dynamics (no transition)
+step2_opt <- simulate_sim_iot_baseline(calib3, T = 20, c_v = c_v_baseline_play)
 
 ggplot2::ggplot(step2_opt, ggplot2::aes(year, V)) +
   ggplot2::geom_line(linewidth = 1, color = "darkgreen") +
@@ -148,4 +234,4 @@ ggplot2::ggplot(step2_opt, ggplot2::aes(year, V)) +
 
 ### Interpretation
 
-Step 2 fits the integrated SIM+IOT structure and produces a 20-year baseline path without activating transition pressure.
+Step 2 fits SIM+IOT and runs the baseline dynamics without any transition mechanism.
