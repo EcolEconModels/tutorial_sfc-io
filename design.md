@@ -87,3 +87,36 @@ For R files we have a main function, with  `if (!interactive()) {  main() }`, so
    - Output/plot slide
    - Play slide that specifies what parameters to play with
    - Interpretation slide
+
+## Workshop Delivery Infrastructure
+
+The tutorial must run reliably through three paths:
+
+1. Binder (primary online path, RStudio in browser)
+2. Local RStudio with `renv`
+3. Pre-rendered static HTML via GitHub Pages
+
+### Non-negotiable constraints
+
+1. `tutorial_sfc-io.qmd` remains the only authored tutorial logic source.
+2. Generated files in `R/` are derived artifacts only.
+3. No hidden tutorial logic in standalone `.R` modules outside generated outputs.
+4. Keep setup minimal and reliable; avoid optional tooling unless required.
+
+### Reproducibility and startup policy
+
+1. Binder config should be minimal and prioritize startup reliability over sophistication.
+2. Keep dependency footprint small to reduce Binder build timeouts.
+
+### CI/Publishing policy
+
+1. GitHub Actions renders `tutorial_sfc-io.qmd` to HTML on push to `main`.
+2. Publish static output to GitHub Pages as no-fail viewing fallback.
+3. Render must work from repository root with stable relative paths.
+
+### Acceptance criteria
+
+1. Clean clone + `scripts/setup_local.R` + render works locally.
+2. Binder launches RStudio and can run/render tutorial without manual environment repair.
+3. GitHub Pages always serves latest rendered tutorial.
+4. All three paths are documented in README with troubleshooting notes.
