@@ -58,13 +58,22 @@ Add exports, import leakage, and trade balance tracking.
 |---|---:|---:|---:|---:|---:|
 | Exports `EX` | `0` | `0` | `+EX` | `-EX` | `0` |
 | Imports `IM` | `0` | `0` | `-IM` | `+IM` | `0` |
-| Trade balance `TB=EX-IM` | `0` | `0` | `+TB` mirror | `-TB` mirror | `0` |
+| Change in net foreign assets `Delta_NFA` | `0` | `0` | `-Delta_NFA` | `+Delta_NFA` | `0` |
+
+From column sums:
+- Domestic external account (production proxy): `EX - IM - Delta_NFA = 0`, so `Delta_NFA = TB = EX - IM`.
+- RoW account: `-EX + IM + Delta_NFA = 0`.
 
 ### BSM (RoW-lite implication)
 
 | Position (conceptual) | Domestic aggregate | RoW |
 |---|---:|---:|
-| Net external balance | `+TB` flow into domestic income path | `-TB` counterpart |
+| Net foreign asset stock `NFA` | `+NFA` | `-NFA` |
+
+Net-worth identities (column-sum closure):
+- `NW_dom = V - B + NFA`
+- `NW_row = -NFA`
+- `NW_dom + NW_row = 0`
 
 Step 4 adds external demand (`EX`) and import leakage (`IM`) while keeping domestic SIM-IOT closures unchanged.
 Interpretation: this is RoW-lite (national table + leakage), not full bilateral MRIO accounting.

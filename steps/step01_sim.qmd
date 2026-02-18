@@ -45,21 +45,32 @@ Build a simple (SIM) SFC model with Government, Production and Household sectors
 
 Transaction Flow Matrix (TFM, one period, sign by sector column):
 
-| Flow                  | Households | Government | Production | Sum |
-|-----------------------|-----------:|-----------:|-----------:|----:|
-| Wages / income `Y`    |       `+Y` |        `0` |       `-Y` | `0` |
-| Taxes `T`             |       `-T` |       `+T` |        `0` | `0` |
-| Consumption `C`       |       `-C` |        `0` |       `+C` | `0` |
-| Government demand `G` |        `0` |       `-G` |       `+G` | `0` |
+| Flow | Households | Government | Production | Sum |
+|---|---:|---:|---:|---:|
+| Wages / income `Y` | `+Y` | `0` | `-Y` | `0` |
+| Taxes `T` | `-T` | `+T` | `0` | `0` |
+| Consumption `C` | `-C` | `0` | `+C` | `0` |
+| Government demand `G` | `0` | `-G` | `+G` | `0` |
+| Change in bills `Delta_H (= Delta_B)` | `-Delta_H` | `+Delta_B` | `0` | `0` |
 
-From column sums: - Households: `Delta H = YD - C = Y - T - C` - Government: `Delta B = G - T` - Production: `Y = C + G`
+From column sums:
+- Households: `Y - T - C - Delta_H = 0`, so `Delta_H = Y - T - C`.
+- Government: `T - G + Delta_B = 0`, so `Delta_B = G - T`.
+- Production: `-Y + C + G = 0`, so `Y = C + G`.
+- Stock-flow consistency: `Delta_H = Delta_B`.
 
 Balance Sheet Matrix (BSM, simplified SIM view):
 
-|                                   | Households | Government | Production | Sum |
-|-----------------------------------|-----------:|-----------:|-----------:|----:|
-| Government bills / money `H (=B)` |       `+H` |       `-B` |        `0` | `0` |
-| Net worth                         |      `V_h` |      `V_g` |      `V_p` | `0` |
+| | Households | Government | Production | Sum |
+|---|---:|---:|---:|---:|
+| Government bills / money `H (=B)` | `+H` | `-B` | `0` | `0` |
+| Net worth | `V_h` | `V_g` | `V_p` | `0` |
+
+Net-worth identities (column-sum closure):
+- `V_h = H`
+- `V_g = -B`
+- `V_p = 0`
+- with `H = B`, `V_h + V_g + V_p = 0`
 
 Steady-state derivation (SIM): - At steady state, stocks are constant: `H_t = H_{t-1} = H*` so `0 = YD* - C*`, hence `C* = YD* = (1-theta)Y*`. - GDP: `Y* = C* + G = (1-theta)Y* + G*`. - Rearranging: `theta * Y* = G`, so `Y* = G / theta`. - From behavior at steady state: `C* = alpha1*(1-theta)Y* + alpha2*H*` and `C* = (1-theta)Y*`. - Therefore: `H* = ((1-alpha1)*(1-theta)/alpha2) * Y* = ((1-alpha1)*(1-theta)/alpha2) * (G/theta)`. - The fixed-point GDP `Y*` is independent of `alpha1` and `alpha2`; those affect only transition dynamics.
 

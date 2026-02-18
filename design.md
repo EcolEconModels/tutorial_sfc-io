@@ -122,6 +122,9 @@ Question variant generation principle:
    - Output/plot slide
    - Play slide that specifies what parameters to play with
    - Interpretation slide
+6. TFM closure rule (strict): whenever a TFM is shown, include explicit `Delta_<stock>` balancing row(s) so both row sums and column sums are zero.
+7. After each TFM, write the algebraic `Delta_<stock>` definitions implied by column sums.
+8. BSM closure rule (strict): after each BSM, include net-worth formula(s) that show column-sum closure (aggregate net worth sums to zero).
 
 ## Workshop Delivery Infrastructure
 
@@ -172,9 +175,12 @@ The following decisions are additive and do not remove prior scope/content decis
 
 2. The repository root `tutorial_sfc-io.qmd` is an index/entry page linking standalone step tutorials and build commands.
 
-3. Matrix pedagogy order is fixed everywhere to:
+3. Matrix pedagogy order and accounting closure are fixed everywhere:
    - **TFM first**
    - **BSM second**
+   - TFM includes explicit `Delta_<stock>` row(s) so row and column sums close to zero
+   - After each TFM, write the implied `Delta_<stock>` definitions
+   - After each BSM, write net-worth formula(s) showing aggregate closure
 
 4. Step excerpt policy:
    - A step shows only code newly introduced for that step.
