@@ -61,7 +61,7 @@ Define fixed point and lag simulation.
 Define the SIM-lag dynamics as a simple time loop.
 Consumption depends on lagged disposable income and past wealth.
 The function returns a tidy time-series for plotting and comparisons.
-```{r step1_functions_sim_core, echo: false}
+```{r step1_functions_sim_core}
 simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2, Y0 = 80, H0 = 300) {
   out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
   YD_prev <- (1 - theta) * Y0
@@ -137,7 +137,7 @@ Now add SIM-current fixed-point simulation.
 Define SIM-current with within-period fixed-point iteration.
 Each period solves Y from current disposable income and wealth.
 This makes income–consumption contemporaneous instead of lagged.
-```{r step1_functions_sim_current, echo: false}
+```{r step1_functions_sim_current}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
                                     Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
   out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
@@ -260,7 +260,7 @@ Algorithm: build a deterministic cache key from query parameters, then fetch fro
 Algorithm: decode JSON-stat dimension indices into ordered category tables for rows/columns.
 Algorithm: reconstruct dense matrices from sparse JSON-stat value maps.
 These helpers isolate API/parsing complexity from the economics logic used later.
-```{r step2_functions_iot_helpers, echo: false}
+```{r step2_functions_iot_helpers}
 
 ensure_cache_dir <- function(cache_dir = "data") {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
@@ -380,14 +380,13 @@ extract_values_by_dim <- function(js, dim_name) {
 }
 ```
 
-Define compact IOT loader (and keep exogenous-transition function for later advanced step).
+Define compact IOT loader for the core SIM+IOT steps.
 
-This block builds the core IO objects and the advanced exogenous-transition solver wrapper.
-Pseudo-code (loader): identify sectors, compute Z/A/L, and extract C/G/I/EX vectors from IO uses.
-Pseudo-code (calibration): compute import leakage m_i, value-added coefficients, and beta demand shares.
-Pseudo-code (exogenous transition): each year call closure solver, update X/F, then store GDP and sector rates.
-This keeps static IO calibration separate from dynamic closure experiments.
-```{r step2_functions_iot_sim, echo: false}
+This block builds the core IO objects used by Steps 2, 3, and 4.
+Pseudo-code: identify sectors, compute Z/A/L, and extract C/G/I/EX vectors from IO uses.
+Pseudo-code: compute import leakage m_i, value-added coefficients, and beta demand shares.
+This keeps core IO calibration separate from advanced closure experiments introduced in Step 5.
+```{r step2_functions_iot_sim}
 download_or_load_iot <- function(cfg) {
   schema <- iot_schema(cfg$table_type)
   params <- list(freq = cfg$freq, unit = cfg$iot_unit, stk_flow = cfg$scope, geo = cfg$country, time = as.character(cfg$year))
@@ -473,70 +472,6 @@ download_or_load_iot <- function(cfg) {
   out
 }
 
-simulate_iot_exogenous_transition <- function(iot,
-                                              T = 20,
-                                              closure_option = "residual-others",
-                                              g_target = 0.01,
-                                              eps_green = 0.04,
-                                              eps_brown = -0.04,
-                                              max_iter = 20) {
-  idx <- find_energy_indices(iot$sector_codes)
-
-  x_prev <- as.numeric(iot$x0)
-  F_prev <- as.numeric(iot$F0)
-  years <- iot$base_year + seq_len(T) - 1
-
-  out <- data.frame(
-    year = years,
-    closure = closure_option,
-    GDP = NA_real_,
-    X_green = NA_real_,
-    X_brown = NA_real_,
-    g_green = NA_real_,
-    g_brown = NA_real_,
-    g_other = NA_real_,
-    io_resid = NA_real_
-  )
-
-  for (tt in seq_len(T)) {
-    sol <- solve_io_consistency(
-      Z_base = iot$Z0,
-      F_prev = F_prev,
-      x_init = x_prev,
-      diag_mat = diag(iot$n),
-      option = closure_option,
-      eps_R = eps_green,
-      eps_N = eps_brown,
-      g = g_target,
-      idx_ren = idx$idx_green,
-      idx_nren = idx$idx_brown,
-      p_out_ren = 1,
-      p_out_nren = 1,
-      va_coeff = iot$va_coeff,
-      target = "output",
-      max_iter = max_iter,
-      rel_io_tol = 1e-8
-    )
-
-    x_now <- pmax(as.numeric(sol$X), 0)
-    F_now <- pmax(as.numeric(sol$F), 0)
-
-    out[tt, c("GDP", "X_green", "X_brown", "g_green", "g_brown", "g_other", "io_resid")] <- c(
-      sum(iot$va_coeff * x_now),
-      x_now[idx$idx_green],
-      x_now[idx$idx_brown],
-      sol$g_R,
-      sol$g_N,
-      sol$g_O,
-      sol$rel_io_resid
-    )
-
-    x_prev <- x_now
-    F_prev <- F_now
-  }
-
-  out
-}
 ```
 
 Load IOT for requested configuration.
@@ -551,7 +486,7 @@ Pseudo-code: load wealth stocks, calibrate fiscal/demand parameters, then initia
 Each year: update G, shift brown/green demand shares from endogenous output signals.
 Solve C via reduced-form fixed point, map demand through L to output, then update V and B stocks.
 Store macro and transition indicators for interpretation and scenario comparison.
-```{r step2_functions_sim_iot, echo: false}
+```{r step2_functions_sim_iot}
 load_wealth_init <- function(cfg) {
   params <- list(
     freq = cfg$freq,
@@ -802,7 +737,7 @@ Pseudo-code: keep exports exogenous, compute imports as leakage from domestic fi
 Use net demand (FD_dom - IM) for production, then update GDP/taxes/wealth/debt/trade each period.
 Track TB = EX - IM while preserving the endogenous transition channel from Step 3.
 This gives an interpretable open-economy extension without full MRIO structure.
-```{r step4_functions_row_lite, echo: false}
+```{r step4_functions_row_lite}
 calibrate_sim_iot_row <- function(iot, wealth_init, tau_y = NULL) {
   tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
   list(
@@ -970,9 +905,79 @@ Use the same loaded IOT structure to run an exogenous 20-year energy transition 
 - Closure determines how non-target sectors absorb adjustment
 - Exogenous transition targets enter as `eps_green` and `eps_brown`
 
-```{r step5_run_load_iot}
-source("closure_utils.R")
+Define Step 5 exogenous-transition function.
 
+This function is introduced only in Step 5 (advanced/optional).
+Pseudo-code: each year call the closure solver, enforce exogenous brown/green rates, and store GDP plus energy-sector outputs.
+
+```{r step5_functions_exogenous_transition}
+source("closure_utils.R")
+simulate_iot_exogenous_transition <- function(iot,
+                                              T = 20,
+                                              closure_option = "residual-others",
+                                              g_target = 0.01,
+                                              eps_green = 0.04,
+                                              eps_brown = -0.04,
+                                              max_iter = 20) {
+  idx <- find_energy_indices(iot$sector_codes)
+
+  x_prev <- as.numeric(iot$x0)
+  F_prev <- as.numeric(iot$F0)
+  years <- iot$base_year + seq_len(T) - 1
+
+  out <- data.frame(
+    year = years,
+    closure = closure_option,
+    GDP = NA_real_,
+    X_green = NA_real_,
+    X_brown = NA_real_,
+    g_green = NA_real_,
+    g_brown = NA_real_,
+    g_other = NA_real_,
+    io_resid = NA_real_
+  )
+
+  for (tt in seq_len(T)) {
+    sol <- solve_io_consistency(
+      Z_base = iot$Z0,
+      F_prev = F_prev,
+      x_init = x_prev,
+      diag_mat = diag(iot$n),
+      option = closure_option,
+      eps_R = eps_green,
+      eps_N = eps_brown,
+      g = g_target,
+      idx_ren = idx$idx_green,
+      idx_nren = idx$idx_brown,
+      p_out_ren = 1,
+      p_out_nren = 1,
+      va_coeff = iot$va_coeff,
+      target = "output",
+      max_iter = max_iter,
+      rel_io_tol = 1e-8
+    )
+
+    x_now <- pmax(as.numeric(sol$X), 0)
+    F_now <- pmax(as.numeric(sol$F), 0)
+
+    out[tt, c("GDP", "X_green", "X_brown", "g_green", "g_brown", "g_other", "io_resid")] <- c(
+      sum(iot$va_coeff * x_now),
+      x_now[idx$idx_green],
+      x_now[idx$idx_brown],
+      sol$g_R,
+      sol$g_N,
+      sol$g_O,
+      sol$rel_io_resid
+    )
+
+    x_prev <- x_now
+    F_prev <- F_now
+  }
+
+  out
+}
+```
+```{r step5_run_load_iot}
 step5_T <- if (interactive()) 12 else 20
 step5_max_iter <- if (interactive()) 12 else 20
 
@@ -1108,7 +1113,7 @@ Pseudo-code: normalize sector codes and align IO sectors with available AEA emis
 Compute intensity (kg per MEUR) from AEA emissions and base-year output.
 Run model with stored sector output X_t and compute CO2_t as dot(X_t, intensity).
 This yields production-based baseline vs transition emissions trajectories.
-```{r step6_functions_emissions, echo: false}
+```{r step6_functions_emissions}
 normalize_nace_code <- function(x) {
   y <- toupper(as.character(x))
   y <- gsub("-", "_", y)
