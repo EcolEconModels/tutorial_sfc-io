@@ -48,10 +48,25 @@ Start from the fitted Step 2 baseline model and activate endogenous energy reall
 
 ### Equations
 
-- `signal_t = (X_green,t-1 - X_brown,t-1) / sum_i |X_i,t-1|`
-- `shift_t = max(0, transition_speed * (1 + transition_signal_weight * signal_t))`
-- `beta_C,brown,t = beta_C,brown,t-1 - shift_t`
-- `beta_C,green,t = beta_C,green,t-1 + shift_t`
+Step 3 keeps the Step 2 SIM-IOT accounting structure and changes only the demand-share dynamics for energy sectors.
+So TFM and BSM closures remain those of Step 2; the new logic is how `beta_C` evolves over time.
+
+Endogenous transition mechanism:
+- Transition signal from previous-year sector outputs: `signal_t = (x_green,t-1 - x_brown,t-1) / sum_i |x_i,t-1|`
+- Endogenous shift size: `shift_t = max(0, transition_speed * (1 + transition_signal_weight * signal_t))`
+- Share reallocation: `beta_C,brown,t = beta_C,brown,t-1 - shift_t`, `beta_C,green,t = beta_C,green,t-1 + shift_t`
+- Normalization/feasibility: reallocation is bounded so shares remain non-negative and sum-preserving.
+
+Coupled macro-production loop (unchanged from Step 2):
+- `f_t = beta_C,t * C_t + beta_G * G_t + I`
+- `x_t = L f_t`, `Y_t = sum_i(v_i * x_i,t)`
+- `C_t = c_y * YD_t + c_v * V_{t-1}`, `V_t = V_{t-1} + YD_t - C_t`, `B_t = B_{t-1} + (G_t - T_t)`
+
+Economic meaning of symbols:
+- `transition_speed`: baseline annual pace of brown-to-green reallocation.
+- `transition_signal_weight`: amplifies or dampens reallocation based on prior output gap between green and brown sectors.
+- `beta_C,t`: time-varying household demand composition vector that feeds production through `L`.
+- `x_green`, `x_brown`: selected energy sector outputs used only to generate the transition signal.
 
 Rebuild Step 2 baseline objects in this standalone step.
 

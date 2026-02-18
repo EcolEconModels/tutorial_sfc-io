@@ -47,10 +47,27 @@ Add exports, import leakage, and trade balance tracking.
 
 ### Equations
 
-- `FD_dom,i,t = C_i,t + G_i,t + I_i + EX_i,t`
-- `IM_i,t = m_i * FD_dom,i,t`
-- `FD_net,i,t = FD_dom,i,t - IM_i,t`
-- `TB_t = EX_t - IM_t`
+Step 4 opens the Step 3 economy by separating domestic final demand, imports, and exports.
+The closure moves from a closed identity (`Y = C + G + I`) to an open one (`Y = C + G + I + EX - IM`) while keeping SIM stock-flow accounting.
+
+Closed-to-open decomposition:
+- Domestic final demand by sector: `FD_dom,i,t = C_i,t + G_i,t + I_i + EX_i,t`
+- Import leakage by sector: `IM_i,t = m_i * FD_dom,i,t`
+- Net domestic demand for domestic production: `FD_net,i,t = FD_dom,i,t - IM_i,t`
+- Production mapping: `x_t = L * FD_net,t`
+- Trade aggregates: `EX_t = sum_i EX_i,t`, `IM_t = sum_i IM_i,t`, `TB_t = EX_t - IM_t`
+
+Macro block remains SIM-consistent:
+- `Y_t = sum_i(v_i * x_i,t)`, `T_t = tau_y * Y_t`, `YD_t = Y_t - T_t`
+- `C_t = c_y * YD_t + c_v * V_{t-1}`
+- `V_t = V_{t-1} + YD_t - C_t`, `B_t = B_{t-1} + (G_t - T_t)`
+
+Economic meaning of symbols:
+- `m_i`: sector-specific import propensity applied to domestic final-demand uses.
+- `EX_i,t`: exogenous export demand for domestic sector `i`.
+- `FD_net`: portion of final demand satisfied by domestic production technology `A`.
+- `TB_t`: trade balance; in this minimal setup it is the period change in net foreign asset position.
+- `Delta_NFA_t = TB_t`: external stock-flow bridge.
 
 ### TFM (RoW-lite extension)
 
@@ -64,6 +81,10 @@ From column sums:
 - Domestic external account (production proxy): `EX - IM - Delta_NFA = 0`, so `Delta_NFA = TB = EX - IM`.
 - RoW account: `-EX + IM + Delta_NFA = 0`.
 
+Aggregate-to-sector interpretation:
+- Each aggregate flow is a sum over sector flows: `EX = sum_i EX_i`, `IM = sum_i IM_i`.
+- A fully sector-expanded open-economy TFM would keep separate production columns by sector and bilateral import/export lines; the table above is the compact external-account projection.
+
 ### BSM (RoW-lite implication)
 
 | Position (conceptual) | Domestic aggregate | RoW |
@@ -74,6 +95,10 @@ Net-worth identities (column-sum closure):
 - `NW_dom = V - B + NFA`
 - `NW_row = -NFA`
 - `NW_dom + NW_row = 0`
+
+Sector-expansion interpretation:
+- In a full sector-expanded BSM, domestic `NFA` would still be aggregate while domestic firm/household/government financial positions could be disaggregated.
+- The compact BSM shown here keeps only the external stock needed to close the open-economy SFC identities.
 
 Step 4 adds external demand (`EX`) and import leakage (`IM`) while keeping domestic SIM-IOT closures unchanged.
 Interpretation: this is RoW-lite (national table + leakage), not full bilateral MRIO accounting.

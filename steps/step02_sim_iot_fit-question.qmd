@@ -48,12 +48,32 @@ Integrate SIM stocks-flows with IOT production, fit to base-year data, and simul
 
 ### Equations
 
-- `x_t = L f_t`
-- `Y_t = sum_i(v_i x_i,t)`
-- `T_t = tau_y * Y_t`
-- `C_t = c_y * YD_t + c_v * V_{t-1}`
-- `V_t = V_{t-1} + YD_t - C_t`
-- `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
+Step 2 adds explicit production structure from the symmetric IOT.  
+The production block is built once from the base year and then used every simulation year to map final demand to sector output.
+
+IO construction and production mapping:
+- Technical coefficients from base-year transactions: `A_ij = Z_ij / x_j`
+- Leontief inverse: `L = (I - A)^(-1)`
+- Sector final demand vector: `f_i,t = C_i,t + G_i,t + I_i`
+- Demand shares: `C_i,t = beta_C,i * C_t`, `G_i,t = beta_G,i * G_t`
+- Sector output: `x_t = L f_t`
+- GDP/value-added aggregation: `Y_t = sum_i(v_i * x_i,t)`
+
+SIM block coupled to IO block:
+- Taxes and disposable income: `T_t = tau_y * Y_t`, `YD_t = Y_t - T_t`
+- Consumption behavior: `C_t = c_y * YD_t + c_v * V_{t-1}`
+- Wealth/debt accumulation: `V_t = V_{t-1} + YD_t - C_t`, `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
+
+Economic meaning of symbols:
+- `Z_ij`: intermediate sale from sector `i` to sector `j` in the observed IOT.
+- `x_j`: gross output of sector `j`; dividing each column of `Z` by `x_j` gives input requirements per unit output.
+- `A`: fixed-coefficient production technology matrix (Leontief technology assumption).
+- `L`: total direct+indirect production requirements for one unit of final demand.
+- `f_t`: sectoral final demand vector used by production; in this step it combines households, government, and exogenous investment.
+- `beta_C,i`, `beta_G,i`: sectoral composition weights that map aggregate `C_t` and `G_t` into sector vectors.
+- `v_i`: value-added share in sector `i`, used to aggregate `x_t` to GDP proxy.
+- `tau_y`, `c_y`, `c_v`: effective tax rate and household behavioral propensities.
+- `V_t`, `B_t`: household net financial wealth and government debt (equal in this two-sector financial closure).
 
 ### TFM (Step 2 additions first)
 
@@ -71,7 +91,12 @@ From column sums:
 - Production: `-Y + C + G = 0`, so `Y = C + G`.
 - Stock-flow consistency: `Delta_V = Delta_B`.
 
-Investment `I` is treated as exogenous final demand in the IO block and is not represented as a separate sectoral flow in this minimal TFM.
+How this relates to IO sector detail:
+- Aggregated production flow `Y` equals sector-summed value added: `Y = sum_i(v_i * x_i)`.
+- Aggregated `C` and `G` are composed from sector vectors `C_i = beta_C,i * C`, `G_i = beta_G,i * G`.
+- A fully sector-expanded TFM would replace one production column by `n` sector columns and show each `C_i`, `G_i`, `I_i`, and intermediate deliveries `Z_ij`; the table shown here is its compact aggregate projection.
+
+Investment `I` is treated as exogenous final demand in the IO block and is not represented as a separate institutional column in this minimal TFM.
 
 ### BSM (Step 2 stock mapping)
 
@@ -83,6 +108,10 @@ Net-worth identities (column-sum closure):
 - `NW_h = V`
 - `NW_g = -B`
 - with `V = B`, `NW_h + NW_g = 0`
+
+How this relates to sector detail:
+- In this minimal closure, production sectors carry no explicit financial assets/liabilities in the BSM.
+- A fully sector-expanded BSM could assign firm equity/debt per sector `i`; aggregate net worth would still sum to zero across sectors and institutions.
 
 Step 2 change vs Step 1: production is mapped through the IOT (`x = Lf`), while stock-flow closure remains the SIM wealth/debt core.
 

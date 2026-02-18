@@ -110,45 +110,59 @@ alpha2 <- 0.2 # fraction consumption out of wealth
 # fixed points for GDP and wealth
 Y_star <- G / theta
 H_star <- ((1 - alpha1) * (1 - theta) * Y_star) / alpha2
-# setting Y0 below the fixed point, try above as well!
-Y0_low <- 0.7 * Y_star
-# setting H0 consistent with Y0, try something else, e.g. 0.0 as well!
-H0_low <- (Y0_low * (1 - alpha1 * (1 - theta)) - G) / alpha2
+
+# setting Y0 below the fixed point, try above the fixed point as well!
+Y0 <- 0.7 * Y_star
+#Y0 <- 1.3 * Y_star
+
+# set H0 consistent with Y0, try something else, e.g. 0.0 as well!
+H0 <- (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
+#H0 <- 0.0
+
 # also define above-fixed-point initial values for comparison plots
-Y0_high_play <- 1.3 * Y_star
-H0_high_play <- (Y0_high_play * (1 - alpha1 * (1 - theta)) - G) / alpha2
-lag_low <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
-lag_low$DEF <- G - lag_low$T_tax
-lag_low$H_from_DEF <- H0_low + cumsum(lag_low$DEF)
+lag <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0, H0 = H0)
+lag$DEF <- G - lag$T_tax
+lag$H_from_DEF <- H0 + cumsum(lag$DEF)
 ```
 
-SIM-current is not so easy to simulate, since updates are circular! Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` depends on current disposable income and past wealth. Current disposable income `YD_t` depends on current output.
+See if same fixed point is reached with a different initial condition, e.g. above the fixed point
 
-Define SIM-current with within-period fixed-point iteration. Each period solves Y from current disposable income and wealth. This makes income–consumption contemporaneous instead of lagged.
+How about if we choose `H0`, e.g. 0.0, that is not "consistent" with the `Y0`?
+
+SIM-current with Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` is not so easy to simulate, since updates are interdependent. `C_t` depends on current disposable income `YD_t` and past wealth. Current disposable income `YD_t = Y_t - T_t = C_t + G - T_t`. Thus, there is a circularity/interdependence. So we need to solve for these variables consistently with each other.
+
+For a simple linear system, we can invert directly the system of equations directly. But in general, we perform fixed-point iteration within each period / time step, here a year.
+In this specific linear SIM-current case, the system reduces to `Y_t = G + alpha1 * (1 - theta) * Y_t + alpha2 * H_{t-1}`.
+So we can solve directly as `Y_t = (G + alpha2 * H_{t-1}) / (1 - alpha1 * (1 - theta))`.
+We still use fixed-point iteration on the full block (`C -> Y -> T -> YD -> C`) because that approach extends directly to nonlinear or richer model variants.
+
 
 ```{r step1_functions_sim_current}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
                                     Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
   out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
   H_prev <- H0
-  Y_prev <- Y0
+  C_prev <- Y0 - G
   for (tt in seq_len(T)) {
-    Y_guess <- Y_prev
+    C_guess <- C_prev
     n_iter <- 0L
     repeat {
       n_iter <- n_iter + 1L
-      Y_new <- G + alpha1 * (1 - theta) * Y_guess + alpha2 * H_prev
-      if (abs(Y_new - Y_guess) < fp_tol || n_iter >= fp_max) break
-      Y_guess <- Y_new
+      Y_t <- C_guess + G
+      T_t <- theta * Y_t
+      YD_t <- Y_t - T_t
+      C_new <- alpha1 * YD_t + alpha2 * H_prev
+      if (abs(C_new - C_guess) < fp_tol || n_iter >= fp_max) break
+      C_guess <- C_new
     }
-    Y_t <- Y_new
+    C_t <- C_new
+    Y_t <- C_t + G
     T_t <- theta * Y_t
     YD_t <- Y_t - T_t
-    C_t <- alpha1 * YD_t + alpha2 * H_prev
     H_t <- H_prev + YD_t - C_t
     out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
     H_prev <- H_t
-    Y_prev <- Y_t
+    C_prev <- C_t
   }
   out
 }
@@ -156,36 +170,35 @@ simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, 
 
 Compare lag and current dynamics.
 
-Run SIM-current from below and above the fixed point. Plot lag and current dynamics together for comparison. This shows how timing assumptions affect transients.
+Run SIM-current with the same initial condition used above. Plot lag and current dynamics together so participants can compare timing assumptions under one shared starting point.
 
 ```{r step1_run_compare_lag_current}
-lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
-cur_low <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
-cur_high <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
+lag <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0, H0 = H0)
+cur <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0, H0 = H0)
 
-yr <- range(c(lag_low$Y, lag_high_play$Y, cur_low$Y, cur_high$Y, Y_star), na.rm = TRUE)
+yr <- range(c(lag$Y, cur$Y, Y_star), na.rm = TRUE)
 pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
-plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+plot(lag$t, lag$Y, type = "l", lwd = 2, col = "steelblue",
      ylim = c(yr[1] - pad, yr[2] + pad),
      xlab = "t", ylab = "GDP", main = "Step 1C: SIM-lag vs SIM-current")
-lines(lag_high_play$t, lag_high_play$Y, lwd = 2, col = "firebrick")
-lines(cur_low$t, cur_low$Y, lwd = 2, col = "darkgreen")
-lines(cur_high$t, cur_high$Y, lwd = 2, col = "purple4")
+lines(cur$t, cur$Y, lwd = 2, col = "darkgreen")
 abline(h = Y_star, lty = 2)
-legend("right", legend = c("Lag below", "Lag above", "Current below", "Current above", "Y*"),
-       col = c("steelblue", "firebrick", "darkgreen", "purple4", "black"),
-       lty = c(1, 1, 1, 1, 2), bty = "n")
+legend("right", legend = c("Lag", "Current", "Y*"),
+       col = c("steelblue", "darkgreen", "black"),
+       lty = c(1, 1, 2), bty = "n")
 ```
 
 Optional play: adjust wealth propensity in both variants.
 
 Vary the propensity to consume out of wealth (alpha2). Rerun both lag and current versions with the new alpha2. Plot the impact on speed of convergence.
 
+Try also alpha2 = 0.0!
+
 ```{r step1_play_optional_alpha2}
 alpha2_play <- 0.25  # @exercise[id=step1_alpha2;kind=optional;question_expr=0.1;prompt="Change alpha2 and compare speed of convergence";hint="Lower alpha2 usually slows wealth-driven demand"]
 
-lag_opt <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
-cur_opt <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
+lag_opt <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0, H0 = H0)
+cur_opt <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0, H0 = H0)
 
 plot(lag_opt$t, lag_opt$Y, type = "l", lwd = 2, col = "steelblue",
      xlab = "t", ylab = "GDP", main = "Step 1 Optional: effect of alpha2")

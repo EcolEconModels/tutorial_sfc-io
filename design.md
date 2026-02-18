@@ -24,6 +24,7 @@ We want the following progressive steps in the tutorial. Each is a separate sect
 For R files we have a main function, with  `if (!interactive()) {  main() }`, so that `source`-ing the file into a later step/section won't run the code and plots already explored/seen in the previous step.
 
 - Introduce and simulate a closed minimal SFC model: SIM (simple) model from Godley and Lavoie book
+    - Use the same style as Step 1 in all later steps: define each symbol and explain each equation block in economic terms
     - Show Transaction Flow Matrix (TFM) first, then Balance Sheet Matrix (BSM), for Government, Production and Households before running simulations.
     - Use a wages-only income flow in the tutorial SIM baseline so the accounting and calibration remain minimal.
     - Derive steady state equation for GDP
@@ -32,6 +33,9 @@ For R files we have a main function, with  `if (!interactive()) {  main() }`, so
 
 - Step 2 core: Incorporate IOT as production sector into SIM model and fit baseline
     - Load IOT and use it as production sector
+    - Explicitly derive technical coefficients `A` from `Z` and base output `x`, then derive `L = (I - A)^(-1)`
+    - Show how sector final demand maps to sector output (`x = Lf`) and then to aggregate GDP (`Y = sum_i v_i x_i`)
+    - Explain how compact TFM/BSM aggregates correspond to sector-expanded vectors/matrices
     - Fit SIM-side parameters to base-year macro values
     - Simulate the fitted model for 20 years with transition speed set to zero
 
@@ -40,6 +44,8 @@ For R files we have a main function, with  `if (!interactive()) {  main() }`, so
     - Compare transition path to Step 2 no-transition baseline
 
 - Step 4 core: Add a minimal Rest of the World (RoW) sector and treat imports and exports consistently
+    - Show the closed-to-open decomposition explicitly: `FD_dom`, `IM`, `FD_net`, `EX`, `TB = EX - IM`
+    - Explain how sector-level imports/exports aggregate into the compact RoW TFM and BSM entries
     - Point out that imports for production are already embedded in Z part of the IOT (total instead of domestic chosen earlier) - these are imports for use by industry
     - Point out that domestic consumption imports are different, and we should be careful to use domestic technology for them! How would MRIO handle this compared to just using national IOT? Outline using equations, but not in the simulation.
     - Point out that exports can be largely attributed to domestic technology and included in final demand.
@@ -125,6 +131,10 @@ Question variant generation principle:
 6. TFM closure rule (strict): whenever a TFM is shown, include explicit `Delta_<stock>` balancing row(s) so both row sums and column sums are zero.
 7. After each TFM, write the algebraic `Delta_<stock>` definitions implied by column sums.
 8. BSM closure rule (strict): after each BSM, include net-worth formula(s) that show column-sum closure (aggregate net worth sums to zero).
+9. Equation exposition rule (strict): every equations section must define each symbol used and explain the economic role of each equation block (not only list equations).
+10. Step 2 IO rule (strict): always show how `Z` maps to `A`, how `L = (I-A)^(-1)` is formed, and how `x = Lf` maps sector demand into output/GDP.
+11. Step 4 open-economy rule (strict): always show the closed-to-open decomposition (`FD_dom`, `IM`, `FD_net`, `EX`, `TB`) and explain aggregate-to-sector mapping.
+12. Expanded-accounting interpretation rule: for each compact TFM/BSM, include one note on how the fully sector-expanded version would look and how compact aggregates are obtained from sector sums.
 
 ## Workshop Delivery Infrastructure
 

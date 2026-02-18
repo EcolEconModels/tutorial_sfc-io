@@ -46,9 +46,25 @@ Use the same loaded IOT structure to run an exogenous 20-year energy transition 
 
 ### Equations
 
-- `x_t = (I - A_t)^(-1) f_t`
-- Closure determines how non-target sectors absorb adjustment
-- Exogenous transition targets enter as `eps_green` and `eps_brown`
+Step 5 is the exogenous-transition variant: energy-sector growth targets are imposed externally and closure assumptions determine where remaining adjustment falls.
+This is deliberately different from Step 3 (endogenous shares) and is presented as an advanced closure experiment.
+
+Core IO-consistency problem each year:
+- Technology update from base transactions and new output guess: `A_t = Z_base / x_t` (column-wise)
+- Output-demand consistency: `x_t = (I - A_t)^(-1) f_t`
+- Exogenous targets for energy sectors: `g_green = eps_green`, `g_brown = eps_brown`
+- Aggregate growth target: `g_target` for total output/value-added
+- Closure rule allocates residual adjustment to non-target sectors and/or final demand components.
+
+Why closure is needed:
+- With two sector targets (`green`, `brown`) plus an aggregate growth target, the system is underdetermined.
+- Closure options (`residual-others`, `fixed-others`, `uniform-demand`, `eps-only`) impose extra assumptions so one consistent path is selected.
+
+Economic meaning of symbols:
+- `eps_green`, `eps_brown`: exogenous annual growth rates imposed on energy sectors.
+- `g_target`: economy-wide growth target used by the closure.
+- `g_other`: implied growth rate for non-target sectors under the chosen closure.
+- `rel_io_resid`: IO consistency residual from the fixed-point solve; should remain small in successful runs.
 
 Define Step 5 exogenous-transition function.
 

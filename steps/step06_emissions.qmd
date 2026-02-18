@@ -48,8 +48,28 @@ Attach direct production CO2 coefficients and compare baseline vs transition emi
 
 ### Equations
 
-- `CO2_t = sum_i(s_i * x_i,t)`
-- `s_i`: direct sector intensity (`kg CO2 / M EUR`)
+Step 6 converts sector output paths into direct production emissions using AEA-aligned intensities.
+The macro-production simulation is unchanged; only the accounting layer for emissions is added.
+
+Production emissions accounting:
+- Sector intensity (kg per monetary output): `s_i = CO2_i / x_i`
+- Period production emissions: `CO2_t = sum_i(s_i * x_i,t)`
+- Reporting conversion: `CO2_Mt,t = CO2_t / 1e9`
+
+Data alignment logic:
+- IO sectors are normalized/matched to AEA NACE categories.
+- Intensities are estimated from base-year AEA emissions and base-year IO output.
+- Simulated `x_i,t` paths (from RoW-lite loop) are multiplied by fixed `s_i` unless sensitivity modifies intensities.
+
+Economic meaning of symbols:
+- `x_i,t`: domestic production in sector `i` from SIM-IOT-RoW dynamics.
+- `s_i`: direct production emission intensity for sector `i`.
+- `CO2_t`: production-based (territorial production) emissions, not consumption footprint.
+- `intensity_decline`: optional exogenous factor for technical decarbonization sensitivity.
+
+Boundary note (equations/text only):
+- Consumption-based emissions would add imported emission content using foreign technologies (MRIO-style).
+- This tutorial implements production-based emissions only, to keep boundaries explicit and minimal.
 
 Declare emissions configuration (first appearance in tutorial).
 
