@@ -40,15 +40,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: data
-          key: tutorial-data-v2
+          key: tutorial-data-v3
 
-      - name: Render HTML
-        run: quarto render tutorial_sfc-io.qmd --to html --output index.html --output-dir _site
+      - name: Render docs index + step pages
+        run: Rscript build_tutorial.R --generate-question-steps --render-html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: docs
 
   deploy:
     needs: build

@@ -20,12 +20,12 @@ For a slide-show tutorial, html and Reveal.js files are created as single standa
 
 ## Progressive steps:
 
-We want the following progressive steps in the tutorial. Each is a separate section of the tutorial. These are all part of one .qmd file, but create separate R and Python files for each section. Earlier section files use functions, so that we can source earlier files' functions in the current file to emphasize code reuse and avoid duplication and divergence (if needed). 
+We want the following progressive steps in the tutorial. Each is a separate section of the tutorial. Each step is authored as its own standalone step `.qmd` file in `steps/`, with generated R and question variants derived from those step sources. Earlier section files use functions, so that we can source earlier files' functions in the current file to emphasize code reuse and avoid duplication and divergence (if needed). 
 For R files we have a main function, with  `if (!interactive()) {  main() }`, so that `source`-ing the file into a later step/section won't run the code and plots already explored/seen in the previous step.
 
 - Introduce and simulate a closed minimal SFC model: SIM (simple) model from Godley and Lavoie book
-    - Show Balance Sheet Matrix (BSM) and Transaction Flow Matrix (TFM) for Government, Production and Households before running simulations.
-    - Make wages and distributed profits explicit (wage share in output; distributed-profit share as a parameter).
+    - Show Transaction Flow Matrix (TFM) first, then Balance Sheet Matrix (BSM), for Government, Production and Households before running simulations.
+    - Use a wages-only income flow in the tutorial SIM baseline so the accounting and calibration remain minimal.
     - Derive steady state equation for GDP
     - SIM-lag: Use behavioural equations that only depend on previous time step values. Plot GDP from initial value higher and lower than steady state, versus time - 20 years with yearly time step, to see if it reaches the steady state value.
     - SIM-current: Have a switch to instead run fixed point iteration to satisfy behavioural consistency with behavioural equations that depend on current time step values (e.g. consumption from current income and from previous wealth), and compare the simulations in the fixed point iteration case with those above in a similar plot.
@@ -117,7 +117,7 @@ Question variant generation principle:
 5. Every step section in `.qmd` must follow:
    - Objective slide
    - Equations slide
-   - BSM/TFM slide(s) to link stock positions with transaction flows
+   - TFM slide(s) followed by BSM slide(s) to link transaction flows with stock positions
    - Easily digestible code-call slide(s)
    - Output/plot slide
    - Play slide that specifies what parameters to play with
@@ -157,3 +157,75 @@ The tutorial must run reliably through three paths:
 3. GitHub Pages always serves latest rendered tutorial.
 4. All three paths are documented in README with troubleshooting notes.
 5. Question and answer variants are synchronized in CI.
+
+## Latest Locked Refactor Decisions (Additive)
+
+The following decisions are additive and do not remove prior scope/content decisions.
+
+1. Tutorial structure is now six standalone step tutorials:
+   - `steps/step01_sim.qmd`
+   - `steps/step02_sim_iot_fit.qmd`
+   - `steps/step03_endogenous_transition.qmd`
+   - `steps/step04_row_lite.qmd`
+   - `steps/step05_exogenous_transition.qmd`
+   - `steps/step06_emissions.qmd`
+
+2. The repository root `tutorial_sfc-io.qmd` is now an index/entry page linking standalone step tutorials and build commands.
+
+3. Matrix pedagogy order is fixed everywhere to:
+   - **TFM first**
+   - **BSM second**
+
+4. Step excerpt policy:
+   - A step should show only code newly introduced for that step.
+   - If a helper was introduced earlier, later steps should source it and reference the earlier step instead of re-explaining full helper code.
+   - Step pages now keep helper internals in `R/helpers/` and show only step-owned simulation/scenario code in the visible tutorial excerpts.
+
+5. Dual-source architecture is adopted:
+   - Step narratives/simulations in step `.qmd` files.
+   - Shared loading/parsing/calibration helpers in `R/helpers/`.
+
+6. Shared helper files currently used:
+   - `R/helpers/cache_io.R`
+   - `R/helpers/jsonstat_parse.R`
+   - `R/helpers/iot_load.R`
+   - `R/helpers/config_wealth.R`
+   - `R/helpers/calibration.R`
+   - `R/helpers/emissions_load.R`
+   - `R/helpers/shared_dynamics.R`
+
+7. Step-standalone behavior:
+   - Each step qmd must run from a clean R session by sourcing required helper files.
+   - Standalone means executable independently, even if explanatory references point to earlier steps.
+
+8. Build and generation are step-based:
+   - `Rscript build_tutorial.R --generate-question-steps`
+   - `Rscript build_tutorial.R --generate-r-steps-answer --generate-r-steps-question`
+   - `Rscript build_tutorial.R --check-step-sync`
+   - `Rscript build_tutorial.R --render-html`
+
+9. GitHub Pages target structure:
+   - `docs/index.html` landing page
+   - `docs/answer/step01.html` ... `docs/answer/step06.html`
+   - `docs/question/step01.html` ... `docs/question/step06.html`
+
+## Final Repository Structure (Additive)
+
+The structure is finalized for navigability and minimal clutter:
+
+1. Authored/tracked tutorial sources:
+   - Root: `tutorial_sfc-io.qmd`, `build_tutorial.R`, `design.md`, `README.md`, `closure_utils.R`
+   - Steps: `steps/step01_*.qmd` ... `steps/step06_*.qmd` (answer + generated question qmd kept in sync)
+   - Helpers: `R/helpers/*.R`
+
+2. Generated/not-tracked outputs:
+   - Site/render outputs: `docs/`, `steps/*.html`, `steps/*.knit.md`, `steps/docs/`
+   - Per-step generated scripts: `R/step*_answer.R`, `R/step*_question.R`, `R/tutorial_sfc-io*.R`
+   - Legacy generated folders/files: `r_steps/`, root rendered html artifacts, `figure/`, `Rplots.pdf`
+
+3. Single cache location:
+   - `data/` only (cache/download artifacts), not tracked.
+   - No duplicate cache under `steps/`.
+
+4. GitHub Pages behavior:
+   - `docs/` is generated during CI render/deploy and is not required as a tracked source folder.

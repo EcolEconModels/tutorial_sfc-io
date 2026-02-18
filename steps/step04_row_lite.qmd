@@ -1,0 +1,205 @@
+---
+title: "Step 4 - RoW-lite"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Shared Setup
+
+Load minimal packages and global options only.
+
+Check that required packages are installed.
+Stop early with a clear error if anything is missing.
+This keeps the tutorial run deterministic and minimal.
+```{r setup_packages}
+required_packages <- c("jsonlite", "ggplot2")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+}
+```
+
+### Dependency Context
+
+This step is standalone: it reuses Step 2 IO/calibration helpers and introduces only the new RoW-lite simulator here.
+
+```{r source_helpers}
+helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
+source(file.path(helper_dir, 'cache_io.R'))
+source(file.path(helper_dir, 'jsonstat_parse.R'))
+source(file.path(helper_dir, 'iot_load.R'))
+source(file.path(helper_dir, 'config_wealth.R'))
+source(file.path(helper_dir, 'calibration.R'))
+```
+
+## Step 4: RoW-lite
+
+### Objective
+
+Add exports, import leakage, and trade balance tracking.
+
+### Equations
+
+- `FD_dom,i,t = C_i,t + G_i,t + I_i + EX_i,t`
+- `IM_i,t = m_i * FD_dom,i,t`
+- `FD_net,i,t = FD_dom,i,t - IM_i,t`
+- `TB_t = EX_t - IM_t`
+
+### TFM (RoW-lite extension)
+
+| Flow | Households | Government | Production | RoW | Sum |
+|---|---:|---:|---:|---:|---:|
+| Exports `EX` | `0` | `0` | `+EX` | `-EX` | `0` |
+| Imports `IM` | `0` | `0` | `-IM` | `+IM` | `0` |
+| Trade balance `TB=EX-IM` | `0` | `0` | `+TB` mirror | `-TB` mirror | `0` |
+
+### BSM (RoW-lite implication)
+
+| Position (conceptual) | Domestic aggregate | RoW |
+|---|---:|---:|
+| Net external balance | `+TB` flow into domestic income path | `-TB` counterpart |
+
+Step 4 adds external demand (`EX`) and import leakage (`IM`) while keeping domestic SIM-IOT closures unchanged.
+Interpretation: this is RoW-lite (national table + leakage), not full bilateral MRIO accounting.
+
+Define RoW-lite simulation helper.
+
+Algorithm: keep exports exogenous, compute imports as proportional leakage from domestic final demand.
+Algorithm: feed net demand through the Leontief inverse, then update GDP, taxes, wealth, debt, and TB.
+The endogenous transition channel from Step 3 is retained in demand-share updates.
+```{r step4_functions_row_lite}
+simulate_sim_iot_row_lite <- function(calib,
+                                      T = 20,
+                                      c_y = 0.82,
+                                      c_v = 0.03,
+                                      g_G = 0.01,
+                                      ex_growth = 0,
+                                      import_leakage_scale = 1,
+                                      transition_speed = 0.0015) {
+  years <- calib$base_year + seq_len(T) - 1
+  out <- data.frame(
+    year = years,
+    GDP = NA_real_, TAX = NA_real_, YD = NA_real_, C = NA_real_, G = NA_real_,
+    V = NA_real_, DEF = NA_real_, B = NA_real_, EX = NA_real_, IM = NA_real_, TB = NA_real_,
+    betaC_brown = NA_real_, betaC_green = NA_real_
+  )
+
+  V_prev <- calib$V0
+  B_prev <- calib$B0
+  G_prev <- calib$G0
+  x_prev <- as.numeric(calib$L %*% (calib$beta_C * sum(calib$I_i0) + calib$beta_G * calib$G0 + calib$I_i0 + calib$EX_i0))
+  beta_C <- calib$beta_C
+  beta_G <- calib$beta_G
+
+  for (tt in seq_len(T)) {
+    G_t <- if (tt == 1) calib$G0 else G_prev * (1 + g_G)
+    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(tt - 1)
+
+    if (is.finite(calib$idx$idx_green) && is.finite(calib$idx$idx_brown)) {
+      signal <- (x_prev[calib$idx$idx_green] - x_prev[calib$idx$idx_brown]) / pmax(sum(abs(x_prev)), 1)
+      shift <- max(0, transition_speed * (1 + signal))
+      shift <- min(shift, max(beta_C[calib$idx$idx_brown] - 1e-8, 0))
+      beta_C[calib$idx$idx_brown] <- beta_C[calib$idx$idx_brown] - shift
+      beta_C[calib$idx$idx_green] <- beta_C[calib$idx$idx_green] + shift
+    }
+
+    m_eff <- pmin(pmax(calib$m_i * import_leakage_scale, 0), 0.99)
+    S <- 1 - m_eff
+
+    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * beta_C)))
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * (beta_G * G_t + calib$I_i0 + EX_i_t))))
+    den <- 1 - c_y * (1 - calib$tau_y) * k
+    C_t <- max((c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den, 0)
+
+    fd_dom_t <- beta_C * C_t + beta_G * G_t + calib$I_i0 + EX_i_t
+    im_i_t <- m_eff * fd_dom_t
+    fd_net_t <- pmax(fd_dom_t - im_i_t, 0)
+
+    x_t <- pmax(as.numeric(calib$L %*% fd_net_t), 0)
+    Y_t <- sum(calib$va_coeff * x_t)
+    TAX_t <- calib$tau_y * Y_t
+    YD_t <- Y_t - TAX_t
+
+    V_t <- V_prev + YD_t - C_t
+    DEF_t <- G_t - TAX_t
+    B_t <- B_prev + DEF_t
+
+    EX_t <- sum(EX_i_t)
+    IM_t <- sum(im_i_t)
+    TB_t <- EX_t - IM_t
+
+    out[tt, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B", "EX", "IM", "TB", "betaC_brown", "betaC_green")] <- c(
+      Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t, EX_t, IM_t, TB_t,
+      if (is.finite(calib$idx$idx_brown)) beta_C[calib$idx$idx_brown] else NA_real_,
+      if (is.finite(calib$idx$idx_green)) beta_C[calib$idx$idx_green] else NA_real_
+    )
+
+    x_prev <- x_t
+    V_prev <- V_t
+    B_prev <- B_t
+    G_prev <- G_t
+  }
+
+  out
+}
+```
+
+Build RoW-lite calibration and baseline path.
+
+Reuse Step 2 loading/calibration functions; only the RoW dynamics are new in this step.
+This keeps data handling identical and isolates the impact of opening the economy.
+```{r step4_run_baseline}
+if (!exists("calib4", inherits = FALSE)) {
+  core_config <- make_core_config()
+  core_iot <- download_or_load_iot(core_config)
+  core_wealth <- load_wealth_init(core_config)
+  calib4 <- calibrate_sim_iot_row(core_iot, core_wealth)
+}
+step4_baseline <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0)
+```
+
+Core play: import leakage.
+
+Scale import leakage up or down.
+Rerun the RoW-lite model and inspect trade-balance and GDP sensitivity.
+```{r step4_play_core_imports}
+import_leakage_scale_play <- 1.2  # @exercise[id=step4_imports;kind=core;question_expr=0.8;prompt="Change import leakage and inspect GDP/trade balance";hint="Above 1 increases leakage, below 1 reduces leakage"]
+step4_core_play <- simulate_sim_iot_row_lite(calib4, T = 20, import_leakage_scale = import_leakage_scale_play)
+```
+
+Plot Step 4 core comparison.
+
+Compare baseline and play trade-balance paths.
+This plot is the main diagnostic for the RoW-lite extension.
+```{r step4_plot_core, fig.height=4, fig.width=7}
+plot(step4_baseline$year, step4_baseline$TB, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "TB = EX - IM", main = "Step 4 Core Play: trade balance")
+lines(step4_core_play$year, step4_core_play$TB, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline", paste0("play: ", import_leakage_scale_play)),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+```
+
+Optional play: export growth.
+
+Change export growth and rerun RoW-lite.
+Inspect GDP to visualize export-led effects.
+```{r step4_play_optional_exports}
+ex_growth_play <- 0.01  # @exercise[id=step4_exports;kind=optional;question_expr=0.03;prompt="Change export growth and inspect GDP response";hint="Positive export growth raises final demand"]
+step4_opt <- simulate_sim_iot_row_lite(calib4, T = 20, ex_growth = ex_growth_play)
+
+ggplot2::ggplot(step4_opt, ggplot2::aes(year, GDP)) +
+  ggplot2::geom_line(linewidth = 1, color = "purple4") +
+  ggplot2::labs(title = "Step 4 Optional: GDP with export growth", y = "GDP") +
+  ggplot2::theme_minimal()
+```
+
+### MRIO caveat (equations/text only)
+
+Imports in this step use domestic leakage rates. In MRIO, imported bundles should be mapped to foreign technologies and foreign emission intensities.

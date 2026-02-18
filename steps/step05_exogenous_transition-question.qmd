@@ -1,0 +1,210 @@
+---
+title: "Step 5 - Exogenous Transition"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Shared Setup
+
+Load minimal packages and global options only.
+
+Check that required packages are installed.
+Stop early with a clear error if anything is missing.
+This keeps the tutorial run deterministic and minimal.
+```{r setup_packages}
+required_packages <- c("jsonlite", "ggplot2")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+}
+```
+
+### Dependency Context
+
+This step is standalone: it reuses IO loading helpers and introduces exogenous transition closure logic.
+
+```{r source_helpers}
+helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
+source(file.path(helper_dir, 'cache_io.R'))
+source(file.path(helper_dir, 'jsonstat_parse.R'))
+source(file.path(helper_dir, 'iot_load.R'))
+source(file.path(helper_dir, 'config_wealth.R'))
+```
+
+## Step 5: IOT Load + Exogenous Transition (Advanced/Optional)
+
+### Objective
+
+Use the same loaded IOT structure to run an exogenous 20-year energy transition under alternative closure assumptions.
+
+### Equations
+
+- `x_t = (I - A_t)^(-1) f_t`
+- Closure determines how non-target sectors absorb adjustment
+- Exogenous transition targets enter as `eps_green` and `eps_brown`
+
+Define Step 5 exogenous-transition function.
+
+Pseudo-code: each year call the closure solver, enforce exogenous brown/green rates, and store GDP plus energy-sector outputs.
+```{r step5_functions_exogenous_transition}
+closure_file <- if (file.exists("closure_utils.R")) "closure_utils.R" else "../closure_utils.R"
+source(closure_file)
+simulate_iot_exogenous_transition <- function(iot,
+                                              T = 20,
+                                              closure_option = "residual-others",
+                                              g_target = 0.01,
+                                              eps_green = 0.04,
+                                              eps_brown = -0.04,
+                                              max_iter = 20) {
+  idx <- find_energy_indices(iot$sector_codes)
+
+  x_prev <- as.numeric(iot$x0)
+  F_prev <- as.numeric(iot$F0)
+  years <- iot$base_year + seq_len(T) - 1
+
+  out <- data.frame(
+    year = years,
+    closure = closure_option,
+    GDP = NA_real_,
+    X_green = NA_real_,
+    X_brown = NA_real_,
+    g_green = NA_real_,
+    g_brown = NA_real_,
+    g_other = NA_real_,
+    io_resid = NA_real_
+  )
+
+  for (tt in seq_len(T)) {
+    sol <- solve_io_consistency(
+      Z_base = iot$Z0,
+      F_prev = F_prev,
+      x_init = x_prev,
+      diag_mat = diag(iot$n),
+      option = closure_option,
+      eps_R = eps_green,
+      eps_N = eps_brown,
+      g = g_target,
+      idx_ren = idx$idx_green,
+      idx_nren = idx$idx_brown,
+      p_out_ren = 1,
+      p_out_nren = 1,
+      va_coeff = iot$va_coeff,
+      target = "output",
+      max_iter = max_iter,
+      rel_io_tol = 1e-8
+    )
+
+    x_now <- pmax(as.numeric(sol$X), 0)
+    F_now <- pmax(as.numeric(sol$F), 0)
+
+    out[tt, c("GDP", "X_green", "X_brown", "g_green", "g_brown", "g_other", "io_resid")] <- c(
+      sum(iot$va_coeff * x_now),
+      x_now[idx$idx_green],
+      x_now[idx$idx_brown],
+      sol$g_R,
+      sol$g_N,
+      sol$g_O,
+      sol$rel_io_resid
+    )
+
+    x_prev <- x_now
+    F_prev <- F_now
+  }
+
+  out
+}
+```
+
+Load IOT for this advanced step.
+
+Use the same core configuration machinery and cached data path as Step 2.
+```{r step5_run_load_iot}
+step5_T <- if (interactive()) 12 else 20
+step5_max_iter <- if (interactive()) 12 else 20
+
+if (!exists("core_iot", inherits = FALSE)) {
+  core_config <- make_core_config()
+  core_iot <- download_or_load_iot(core_config)
+}
+iot <- core_iot
+c(country = iot$country, year = iot$base_year, n_sectors = iot$n)
+```
+
+Run baseline closure path.
+
+Use baseline closure and fixed aggregate growth target.
+Store GDP and energy-sector paths as the comparison baseline.
+```{r step5_run_baseline}
+step5_baseline <- simulate_iot_exogenous_transition(
+  iot,
+  T = step5_T,
+  closure_option = "residual-others",
+  g_target = 0.01,
+  eps_green = 0.04,
+  eps_brown = -0.04,
+  max_iter = step5_max_iter
+)
+```
+
+Core play: switch closure option.
+
+Run identical targets under a different closure rule and compare GDP path response.
+```{r step5_play_core_closure}
+closure_options <- c("residual-others", "fixed-others", "uniform-demand", "eps-only")
+closure_play <- closure_options[3]  # TODO [core:step5_closure] Switch closure option and inspect GDP and green/brown paths Hint: Compare fixed-others vs uniform-demand
+
+step5_closure_play <- simulate_iot_exogenous_transition(
+  iot,
+  T = step5_T,
+  closure_option = closure_play,
+  g_target = 0.01,
+  eps_green = 0.04,
+  eps_brown = -0.04,
+  max_iter = step5_max_iter
+)
+```
+
+Plot closure comparison.
+
+Overlay GDP paths to isolate closure sensitivity.
+```{r step5_plot_core, fig.height=4, fig.width=7}
+plot(step5_baseline$year, step5_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 5 Core Play: closure effect on GDP")
+lines(step5_closure_play$year, step5_closure_play$GDP, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline", paste0("play: ", closure_play)),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+```
+
+Optional play: strengthen exogenous transition rates.
+
+Change green/brown target rates and inspect the brown/green output ratio path.
+```{r step5_play_optional_eps}
+eps_green_play <- 0.02  # TODO [optional:step5_eps] Change exogenous green growth target and compare brown/green ratio Hint: Use eps_brown = -eps_green
+eps_brown_play <- -eps_green_play
+
+step5_eps_play <- simulate_iot_exogenous_transition(
+  iot,
+  T = step5_T,
+  closure_option = "residual-others",
+  g_target = 0.01,
+  eps_green = eps_green_play,
+  eps_brown = eps_brown_play,
+  max_iter = step5_max_iter
+)
+
+ggplot2::ggplot(step5_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9))) +
+  ggplot2::geom_line(linewidth = 1, color = "firebrick") +
+  ggplot2::labs(title = "Step 5 Optional: brown/green output ratio", y = "X_brown / X_green") +
+  ggplot2::theme_minimal()
+```
+
+### Interpretation
+
+Closure choice and exogenous energy targets change the sectoral adjustment path even when aggregate growth is fixed.

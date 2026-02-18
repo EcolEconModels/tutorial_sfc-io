@@ -1,83 +1,58 @@
-# History files
+# History/session
 .Rhistory
 .Rapp.history
-
-# Session Data files
 .RData
 .RDataTmp
-
-# User-specific files
 .Ruserdata
 
-# Example code in package build process
-*-Ex.R
+# R package/check artifacts
+*.Rcheck/
+*.tar.gz
 
-# Output files from R CMD build
-/*.tar.gz
-
-# Output files from R CMD check
-/*.Rcheck/
-
-# RStudio files
+# RStudio
 .Rproj.user/
 
-# produced vignettes
-vignettes/*.html
-vignettes/*.pdf
-
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
-.httr-oauth
-
-# knitr and R markdown default cache directories
+# knitr/rmarkdown temp
 *_cache/
 /cache/
-
-# Temporary files created by R markdown
 *.utf8.md
 *.knit.md
 
-# R Environment Variables
+# Environment / auth
 .Renviron
+.httr-oauth
 
-# pkgdown site
+# Quarto temp
+.quarto/
+**/*.quarto_ipynb
+
+# Site/deploy outputs (generated, not tracked)
 docs/
+steps/*.html
+steps/*.knit.md
+steps/docs/
+steps/data/
 
-# translation temp files
-po/*~
+# Data cache (single cache location)
+data/
 
-# RStudio Connect folder
-rsconnect/
-
-# ---------------------------
-# tutorial_sfc-io generated outputs
-# ---------------------------
-# Quarto rendered artifacts
+# Generated tutorial artifacts (legacy + current)
 tutorial_sfc-io-notebook.html
 tutorial_sfc-io-slides.html
 tutorial_sfc-io.html
 tutorial_sfc-io_files/
-
-# Generated step scripts and utilities
+tutorial_sfc-io-question.qmd
+tutorial_sfc-io.R
 r_steps/
-
-# Design doc rendered artifacts
+figure/
+Rplots.pdf
 design.html
 design_files/
 
-# Generated code artifacts (single-source workflow from .qmd)
-tutorial_sfc-io.R
-tutorial_sfc-io.py
-tutorial_sfc-io_step*.R
-tutorial_sfc-io_step*.py
+# Generated per-step R scripts (keep authored helpers only)
+R/step*_answer.R
+R/step*_question.R
+R/tutorial_sfc-io*.R
 
-# Plot files
-*.png
-*.eps
-*.tiff
-*.tif
-*.pdf
-
-# Refactored generated layout
-R/
-Python/
-data/
+# RStudio Connect
+rsconnect/

@@ -19,11 +19,17 @@ jobs:
       - name: Install minimal R dependency for generation
         run: Rscript -e "install.packages('knitr', repos='https://cloud.r-project.org')"
 
-      - name: Generate question and R artifacts
-        run: Rscript build_tutorial.R --generate-question-qmd --generate-r-answer --generate-r-question
+      - name: Generate question and step R artifacts
+        run: Rscript build_tutorial.R --generate-question-steps --generate-r-steps-answer --generate-r-steps-question
 
-      - name: Verify question file is tracked
-        run: git ls-files --error-unmatch tutorial_sfc-io-question.qmd
+      - name: Verify step question files are tracked
+        run: |
+          git ls-files --error-unmatch steps/step01_sim-question.qmd
+          git ls-files --error-unmatch steps/step02_sim_iot_fit-question.qmd
+          git ls-files --error-unmatch steps/step03_endogenous_transition-question.qmd
+          git ls-files --error-unmatch steps/step04_row_lite-question.qmd
+          git ls-files --error-unmatch steps/step05_exogenous_transition-question.qmd
+          git ls-files --error-unmatch steps/step06_emissions-question.qmd
 
-      - name: Fail if question file out of sync
-        run: git diff --exit-code -- tutorial_sfc-io-question.qmd
+      - name: Fail if question files out of sync
+        run: Rscript build_tutorial.R --check-step-sync

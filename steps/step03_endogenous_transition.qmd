@@ -1,0 +1,101 @@
+---
+title: "Step 3 - Endogenous Transition"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Shared Setup
+
+Load minimal packages and global options only.
+
+Check that required packages are installed.
+Stop early with a clear error if anything is missing.
+This keeps the tutorial run deterministic and minimal.
+```{r setup_packages}
+required_packages <- c("jsonlite", "ggplot2")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+}
+```
+
+### Dependency Context
+
+This step is standalone: it reuses Step 2 helper modules and changes only transition behavior.
+
+```{r source_helpers}
+helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
+source(file.path(helper_dir, 'cache_io.R'))
+source(file.path(helper_dir, 'jsonstat_parse.R'))
+source(file.path(helper_dir, 'iot_load.R'))
+source(file.path(helper_dir, 'config_wealth.R'))
+source(file.path(helper_dir, 'calibration.R'))
+source(file.path(helper_dir, 'shared_dynamics.R'))
+```
+
+## Step 3: Endogenous Transition
+
+### Objective
+
+Start from the fitted Step 2 model and activate endogenous energy reallocation to study dynamic transition effects.
+
+### Equations
+
+- `shift_t = f(X_green,t-1 - X_brown,t-1)`
+- `beta_C,brown,t = beta_C,brown,t-1 - shift_t`
+- `beta_C,green,t = beta_C,green,t-1 + shift_t`
+
+```{r step3_bootstrap_from_step2, include=FALSE}
+core_config <- make_core_config()
+iot <- download_or_load_iot(core_config)
+wealth_init <- load_wealth_init(core_config)
+calib3 <- calibrate_sim_iot(iot, wealth_init)
+step2_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
+```
+
+Core play: transition speed.
+
+Increase endogenous transition speed from zero.
+Rerun the model and compare GDP against Step 2 no-transition baseline.
+```{r step3_play_core_transition_speed}
+transition_speed_play <- 0.004  # @exercise[id=step3_speed;kind=core;question_expr=0.001;prompt="Change endogenous transition speed and compare GDP/energy-share paths";hint="Try 0.001 then 0.004"]
+step3_play <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = transition_speed_play)
+```
+
+Plot Step 3 core comparison.
+
+Overlay baseline and transition GDP paths to isolate the endogenous transition effect.
+```{r step3_plot_core, fig.height=4, fig.width=7}
+plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 3 Core Play: transition speed")
+lines(step3_play$year, step3_play$GDP, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline (no transition)", paste0("play: ", transition_speed_play)),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+```
+
+Optional play: transition asymmetry / signal sensitivity.
+
+Change the signal weight in the endogenous rule and compare brown/green share dynamics.
+```{r step3_play_optional_signal}
+transition_signal_weight_play <- 1.8  # @exercise[id=step3_signal;kind=optional;question_expr=0.5;prompt="Change transition signal sensitivity and compare brown/green share dynamics";hint="Try 0.5, 1.0, 1.8"]
+step3_opt <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = transition_speed_play, transition_signal_weight = transition_signal_weight_play)
+
+plot(step3_play$year, step3_play$betaC_brown, type = "l", lwd = 2, col = "firebrick",
+     xlab = "year", ylab = "beta_C shares", main = "Step 3 Optional: signal sensitivity")
+lines(step3_opt$year, step3_opt$betaC_brown, lwd = 2, col = "firebrick", lty = 2)
+lines(step3_play$year, step3_play$betaC_green, lwd = 2, col = "darkgreen")
+lines(step3_opt$year, step3_opt$betaC_green, lwd = 2, col = "darkgreen", lty = 2)
+legend("right", legend = c("brown base", "brown play", "green base", "green play"),
+       col = c("firebrick", "firebrick", "darkgreen", "darkgreen"), lty = c(1, 2, 1, 2), bty = "n")
+```
+
+### Interpretation
+
+Step 3 turns transition into a macro-behavioral outcome, starting from the fitted Step 2 baseline.

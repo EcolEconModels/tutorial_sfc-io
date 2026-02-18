@@ -1,0 +1,151 @@
+---
+title: "Step 2 - SIM + IOT Baseline Fit"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Shared Setup
+
+Load minimal packages and global options only.
+
+Check that required packages are installed.
+Stop early with a clear error if anything is missing.
+This keeps the tutorial run deterministic and minimal.
+```{r setup_packages}
+required_packages <- c("jsonlite", "ggplot2")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+}
+```
+
+### Dependency Context
+
+This step is standalone: it sources only the helper modules needed for SIM+IOT fitting and simulation.
+
+```{r source_helpers}
+helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
+source(file.path(helper_dir, 'cache_io.R'))
+source(file.path(helper_dir, 'jsonstat_parse.R'))
+source(file.path(helper_dir, 'iot_load.R'))
+source(file.path(helper_dir, 'config_wealth.R'))
+source(file.path(helper_dir, 'calibration.R'))
+source(file.path(helper_dir, 'shared_dynamics.R'))
+```
+
+## Step 2: SIM + IOT Baseline Fit
+
+### Objective
+
+Integrate SIM stocks-flows with IOT production, fit to base-year data, and simulate a 20-year no-transition baseline.
+
+### Equations
+
+- `x_t = L f_t`
+- `Y_t = sum_i(v_i x_i,t)`
+- `T_t = tau_y * Y_t`
+- `C_t = c_y * YD_t + c_v * V_{t-1}`
+- `V_t = V_{t-1} + YD_t - C_t`
+- `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
+
+### TFM (Step 2 additions first)
+
+| Flow | Households | Government | Production (IOT aggregate) | Sum |
+|---|---:|---:|---:|---:|
+| Disposable income `YD` | `+YD` | `0` | `-YD` | `0` |
+| Taxes `T` | `-T` | `+T` | `0` | `0` |
+| Consumption `C` | `-C` | `0` | `+C` | `0` |
+| Government demand `G` | `0` | `-G` | `+G` | `0` |
+| Capital demand `I` | `0` | `0` | `+I` | `+I` exogenous in closure |
+
+### BSM (Step 2 stock mapping)
+
+| Stock | Households | Government | Sum |
+|---|---:|---:|---:|
+| Wealth / bills `V (=B)` | `+V` | `-B` | `0` |
+
+Step 2 change vs Step 1: production is mapped through the IOT (`x = Lf`), while stock-flow closure remains the SIM wealth/debt core.
+
+### Configuration and Fit Workflow
+
+Declare one core data configuration and keep it consistent across loading, wealth initialization, and calibration.
+The helper modules (introduced in this step) perform three tasks: IO download/parse, wealth loading, and SIM+IOT calibration.
+The simulation function used below is `simulate_sim_iot_endogenous()` from `R/helpers/shared_dynamics.R`.
+
+```{r step2_run_config}
+core_config <- make_core_config()
+```
+
+Calibrate SIM+IOT from Step 2 data.
+
+Load IO and wealth for the configured country/year/table choice.
+Build one calibration object (`calib3`) that stores coefficients and initial stocks.
+This calibrated object is reused in Step 3 and Step 4.
+```{r step2_run_calibrate}
+if (!exists("core_iot", inherits = FALSE) || !identical(core_iot$country, core_config$country) || !identical(core_iot$scope, core_config$scope) || !identical(core_iot$table_type, core_config$table_type) || !identical(as.integer(core_iot$base_year), as.integer(core_config$year))) {
+  core_iot <- download_or_load_iot(core_config)
+}
+if (!exists("core_wealth", inherits = FALSE) || !is.list(core_wealth) || !all(c("V0", "B0") %in% names(core_wealth))) {
+  core_wealth <- load_wealth_init(core_config)
+}
+calib3 <- calibrate_sim_iot(core_iot, core_wealth)
+```
+
+Run 20-year baseline simulation (no endogenous transition).
+
+Transition speed is fixed to zero to isolate the fitted baseline dynamics.
+This gives the no-transition reference path used in Step 3 comparisons.
+```{r step2_run_baseline}
+step2_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
+```
+
+Core play: fiscal stance in baseline (no transition).
+
+Change government spending growth while keeping transition switched off.
+Compare output and debt trajectories against the baseline.
+```{r step2_play_core_fiscal}
+g_G_play <- 0.00  # TODO [core:step2_gG] Change baseline government spending growth and compare GDP/debt paths Hint: Try 0.00, 0.01, 0.03
+step2_core_play <- simulate_sim_iot_endogenous(calib3, T = 20, g_G = g_G_play, transition_speed = 0)
+```
+
+Plot Step 2 core comparison.
+
+Left panel: GDP baseline vs play.
+Right panel: government debt baseline vs play.
+Read both together as macro-output versus fiscal-stock trade-off.
+```{r step2_plot_core, fig.height=4, fig.width=7}
+par(mfrow = c(1, 2))
+plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 2 Core: GDP")
+lines(step2_core_play$year, step2_core_play$GDP, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline", paste0("g_G=", g_G_play)), col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+plot(step2_baseline$year, step2_baseline$B, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "Gov debt B", main = "Step 2 Core: Debt")
+lines(step2_core_play$year, step2_core_play$B, lwd = 2, col = "firebrick")
+par(mfrow = c(1, 1))
+```
+
+Optional play: baseline wealth-consumption behavior.
+
+Change consumption out of wealth with transition still off.
+Inspect how the household wealth path changes under the new behavioral setting.
+```{r step2_play_optional_cv}
+c_v_baseline_play <- 0.01  # TODO [optional:step2_cv] Change baseline c_v and inspect wealth and GDP without transition Hint: Keep transition_speed = 0
+step2_opt <- simulate_sim_iot_endogenous(calib3, T = 20, c_v = c_v_baseline_play, transition_speed = 0)
+
+ggplot2::ggplot(step2_opt, ggplot2::aes(year, V)) +
+  ggplot2::geom_line(linewidth = 1, color = "darkgreen") +
+  ggplot2::labs(title = "Step 2 Optional: household wealth path (no transition)", y = "V") +
+  ggplot2::theme_minimal()
+```
+
+### Interpretation
+
+Step 2 fits the integrated SIM+IOT structure and produces a 20-year baseline path without activating transition pressure.

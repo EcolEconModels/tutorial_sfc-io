@@ -1,0 +1,227 @@
+---
+title: "Step 6 - Emissions"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Shared Setup
+
+Load minimal packages and global options only.
+
+Check that required packages are installed.
+Stop early with a clear error if anything is missing.
+This keeps the tutorial run deterministic and minimal.
+```{r setup_packages}
+required_packages <- c("jsonlite", "ggplot2")
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_packages) > 0) {
+  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+}
+```
+
+### Dependency Context
+
+This step is standalone: it reuses IO/cache/calibration helpers and introduces only the emissions simulation wrapper here.
+
+```{r source_helpers}
+helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
+source(file.path(helper_dir, 'cache_io.R'))
+source(file.path(helper_dir, 'jsonstat_parse.R'))
+source(file.path(helper_dir, 'iot_load.R'))
+source(file.path(helper_dir, 'config_wealth.R'))
+source(file.path(helper_dir, 'calibration.R'))
+source(file.path(helper_dir, 'emissions_load.R'))
+```
+
+## Step 6: AEA Production Emissions
+
+### Objective
+
+Attach direct production CO2 coefficients and compare baseline vs transition emissions paths.
+
+### Equations
+
+- `CO2_t = sum_i(s_i * x_i,t)`
+- `s_i`: direct sector intensity (`kg CO2 / M EUR`)
+
+Declare emissions configuration (first appearance in tutorial).
+
+This configuration is separate from Steps 1-4, because AEA coverage constraints differ.
+It sets country/year/table choices for emission-intensity alignment and loading.
+```{r step6_run_emissions_config}
+emissions_config <- make_emissions_config()
+```
+
+Define Step 6 simulation wrapper with stored sector output.
+
+Algorithm: run the RoW-lite macro loop while storing sectoral output vectors `x_t` each period.
+Later chunks multiply those `x_t` paths by AEA intensities to compute production CO2.
+This is the only new simulation code in Step 6; loading/alignment helpers are reused from earlier helper files.
+```{r step6_functions_emissions}
+simulate_row_with_x <- function(calib,
+                                T = 20,
+                                c_y = 0.82,
+                                c_v = 0.03,
+                                g_G = 0.01,
+                                ex_growth = 0,
+                                import_leakage_scale = 1,
+                                transition_speed = 0.0015) {
+  years <- calib$base_year + seq_len(T) - 1
+  agg <- data.frame(
+    year = years,
+    GDP = NA_real_, TAX = NA_real_, YD = NA_real_, C = NA_real_, G = NA_real_,
+    V = NA_real_, DEF = NA_real_, B = NA_real_, EX = NA_real_, IM = NA_real_, TB = NA_real_,
+    betaC_brown = NA_real_, betaC_green = NA_real_
+  )
+  x_store <- matrix(NA_real_, nrow = T, ncol = calib$n)
+
+  V_prev <- calib$V0
+  B_prev <- calib$B0
+  G_prev <- calib$G0
+  x_prev <- as.numeric(calib$L %*% (calib$beta_C * sum(calib$I_i0) + calib$beta_G * calib$G0 + calib$I_i0 + calib$EX_i0))
+  beta_C <- calib$beta_C
+
+  for (tt in seq_len(T)) {
+    G_t <- if (tt == 1) calib$G0 else G_prev * (1 + g_G)
+    EX_i_t <- calib$EX_i0 * (1 + ex_growth)^(tt - 1)
+
+    if (is.finite(calib$idx$idx_green) && is.finite(calib$idx$idx_brown)) {
+      signal <- (x_prev[calib$idx$idx_green] - x_prev[calib$idx$idx_brown]) / pmax(sum(abs(x_prev)), 1)
+      shift <- max(0, transition_speed * (1 + signal))
+      shift <- min(shift, max(beta_C[calib$idx$idx_brown] - 1e-8, 0))
+      beta_C[calib$idx$idx_brown] <- beta_C[calib$idx$idx_brown] - shift
+      beta_C[calib$idx$idx_green] <- beta_C[calib$idx$idx_green] + shift
+    }
+
+    m_eff <- pmin(pmax(calib$m_i * import_leakage_scale, 0), 0.99)
+    S <- 1 - m_eff
+
+    k <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * beta_C)))
+    b <- as.numeric(t(calib$va_coeff) %*% (calib$L %*% (S * (calib$beta_G * G_t + calib$I_i0 + EX_i_t))))
+    den <- 1 - c_y * (1 - calib$tau_y) * k
+    C_t <- max((c_y * (1 - calib$tau_y) * b + c_v * V_prev) / den, 0)
+
+    fd_dom_t <- beta_C * C_t + calib$beta_G * G_t + calib$I_i0 + EX_i_t
+    im_i_t <- m_eff * fd_dom_t
+    fd_net_t <- pmax(fd_dom_t - im_i_t, 0)
+
+    x_t <- pmax(as.numeric(calib$L %*% fd_net_t), 0)
+    Y_t <- sum(calib$va_coeff * x_t)
+    TAX_t <- calib$tau_y * Y_t
+    YD_t <- Y_t - TAX_t
+
+    V_t <- V_prev + YD_t - C_t
+    DEF_t <- G_t - TAX_t
+    B_t <- B_prev + DEF_t
+
+    EX_t <- sum(EX_i_t)
+    IM_t <- sum(im_i_t)
+    TB_t <- EX_t - IM_t
+
+    agg[tt, c("GDP", "TAX", "YD", "C", "G", "V", "DEF", "B", "EX", "IM", "TB", "betaC_brown", "betaC_green")] <- c(
+      Y_t, TAX_t, YD_t, C_t, G_t, V_t, DEF_t, B_t, EX_t, IM_t, TB_t,
+      if (is.finite(calib$idx$idx_brown)) beta_C[calib$idx$idx_brown] else NA_real_,
+      if (is.finite(calib$idx$idx_green)) beta_C[calib$idx$idx_green] else NA_real_
+    )
+
+    x_store[tt, ] <- x_t
+    x_prev <- x_t
+    V_prev <- V_t
+    B_prev <- B_t
+    G_prev <- G_t
+  }
+
+  list(aggregate = agg, x = x_store)
+}
+```
+
+Prepare Step 6 calibration and baseline/transition runs.
+
+Load IO and wealth with emissions configuration.
+Align IO sectors to AEA sector availability, then load direct CO2 intensities.
+Build baseline and transition-ready calibration once.
+```{r step6_run_calibrate}
+iot_emis <- download_or_load_iot(emissions_config)
+if (isTRUE(emissions_config$enforce_co2_consistency)) iot_emis <- align_iot_to_aea(iot_emis, emissions_config)
+wealth_emis <- load_wealth_init(emissions_config)
+calib5 <- calibrate_sim_iot_row(iot_emis, wealth_emis)
+aea_intensity <- load_aea_emissions(emissions_config, iot_emis$sector_codes, iot_emis$x0)
+```
+
+Core play: compare baseline and transition CO2.
+
+Run baseline and transition simulations with stored `x_t`.
+Attach production intensities to both runs and compare resulting CO2 paths.
+```{r step6_play_core_transition}
+transition_speed_emis_play <- 0.0  # TODO [core:step6_transition] Compare baseline and transition CO2 paths Hint: Use 0 for baseline and positive speed for transition
+
+step6_baseline_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = 0)
+step6_transition_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = transition_speed_emis_play)
+
+step6_base <- attach_production_emissions(step6_baseline_sim, aea_intensity, iot_emis$sector_codes)
+step6_trans <- attach_production_emissions(step6_transition_sim, aea_intensity, iot_emis$sector_codes)
+
+step6_compare <- rbind(
+  data.frame(step6_base, scenario = "baseline"),
+  data.frame(step6_trans, scenario = paste0("transition:", transition_speed_emis_play))
+)
+```
+
+Plot Step 6 core comparison.
+
+Plot production CO2 for baseline and transition on the same axes.
+This is the main emissions comparison figure.
+```{r step6_plot_core, fig.height=4, fig.width=7}
+ggplot2::ggplot(step6_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::labs(title = "Step 6 Core Play: direct production CO2", y = "Mt CO2") +
+  ggplot2::theme_minimal()
+```
+
+Optional play: sensitivity to intensity decline.
+
+Apply an exogenous decline factor to intensities.
+Recompute CO2 for the transition run to separate activity effects from intensity effects.
+```{r step6_play_optional_intensity_decline}
+intensity_decline_play <- 0.0  # TODO [optional:step6_intensity] Apply annual intensity decline and compare CO2 path Hint: This is exogenous decarbonization of direct intensity
+
+aea_intensity_play <- aea_intensity
+aea_intensity_play$intensity_kg_per_meur <- aea_intensity_play$intensity_kg_per_meur * (1 - intensity_decline_play)
+
+step6_play <- attach_production_emissions(step6_transition_sim, aea_intensity_play, iot_emis$sector_codes)
+
+ggplot2::ggplot(step6_play, ggplot2::aes(year, CO2_Mt)) +
+  ggplot2::geom_line(linewidth = 1, color = "darkred") +
+  ggplot2::labs(title = "Step 6 Optional: with intensity decline", y = "Mt CO2") +
+  ggplot2::theme_minimal()
+```
+
+### Consumption-emissions caveat (equations/text only)
+
+A consumption footprint would require domestic and imported embodied intensities, not only domestic production intensities.
+
+## Final Snapshot
+
+Report final-year key aggregates from Step 6.
+
+Extract the final year and display key macro/CO2 indicators by scenario.
+```{r final_snapshot}
+last_year <- max(step6_compare$year)
+summary_final <- step6_compare[step6_compare$year == last_year, c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
+summary_final <- summary_final[order(summary_final$scenario), ]
+rownames(summary_final) <- NULL
+summary_final
+```
+
+## Limitations
+
+- Prices are fixed.
+- No banking, portfolio, or inventories.
+- RoW-lite is pedagogical; MRIO is required for full footprint attribution.
