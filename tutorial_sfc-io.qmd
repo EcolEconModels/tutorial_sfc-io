@@ -103,7 +103,10 @@ Plot the GDP path from the lag model.
 Overlay the analytic fixed point as a horizontal reference.
 This visualizes convergence from below.
 ```{r step1_plot_lag_below, fig.height=4, fig.width=7}
+yr <- range(c(lag_low$Y, Y_star), na.rm = TRUE)
+pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
 plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+     ylim = c(yr[1] - pad, yr[2] + pad),
      xlab = "t", ylab = "GDP", main = "Step 1A: SIM-lag from below fixed point")
 abline(h = Y_star, lty = 2)
 ```
@@ -118,7 +121,10 @@ Y0_high_play <- 1.3 * Y_star  # @exercise[id=step1_high_start;kind=core;question
 H0_high_play <- (Y0_high_play * (1 - alpha1 * (1 - theta)) - G) / alpha2
 lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
 
+yr <- range(c(lag_low$Y, lag_high_play$Y, Y_star), na.rm = TRUE)
+pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
 plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+     ylim = c(yr[1] - pad, yr[2] + pad),
      xlab = "t", ylab = "GDP", main = "Step 1B: SIM-lag from below and above")
 lines(lag_high_play$t, lag_high_play$Y, lwd = 2, col = "firebrick")
 abline(h = Y_star, lty = 2)
@@ -168,7 +174,10 @@ This shows how timing assumptions affect transients.
 cur_low <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
 cur_high <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
 
+yr <- range(c(lag_low$Y, lag_high_play$Y, cur_low$Y, cur_high$Y, Y_star), na.rm = TRUE)
+pad <- 0.05 * diff(yr); if (!is.finite(pad) || pad <= 0) pad <- 1
 plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+     ylim = c(yr[1] - pad, yr[2] + pad),
      xlab = "t", ylab = "GDP", main = "Step 1C: SIM-lag vs SIM-current")
 lines(lag_high_play$t, lag_high_play$Y, lwd = 2, col = "firebrick")
 lines(cur_low$t, cur_low$Y, lwd = 2, col = "darkgreen")
@@ -575,7 +584,8 @@ simulate_sim_iot_endogenous <- function(calib,
                                         c_y = 0.82,
                                         c_v = 0.03,
                                         g_G = 0.01,
-                                        transition_speed = 0.0015) {
+                                        transition_speed = 0.0015,
+                                        transition_signal_weight = 1) {
   years <- calib$base_year + seq_len(T) - 1
   out <- data.frame(
     year = years,
@@ -595,7 +605,7 @@ simulate_sim_iot_endogenous <- function(calib,
 
     if (is.finite(calib$idx$idx_green) && is.finite(calib$idx$idx_brown)) {
       signal <- (x_prev[calib$idx$idx_green] - x_prev[calib$idx$idx_brown]) / pmax(sum(abs(x_prev)), 1)
-      shift <- max(0, transition_speed * (1 + signal))
+      shift <- max(0, transition_speed * (1 + transition_signal_weight * signal))
       shift <- min(shift, max(beta_C[calib$idx$idx_brown] - 1e-8, 0))
       beta_C[calib$idx$idx_brown] <- beta_C[calib$idx$idx_brown] - shift
       beta_C[calib$idx$idx_green] <- beta_C[calib$idx$idx_green] + shift
@@ -635,13 +645,13 @@ simulate_sim_iot_endogenous <- function(calib,
 Calibrate SIM+IOT from Step 2 data.
 
 Load IO and wealth data for the core configuration.
-Construct the SIM+IO calibration object.
-This object feeds all Step 3 simulations.
+Construct the SIM+IOT calibration once and keep core data in memory.
+Reuse these objects in Steps 3, 4, and 5 to avoid repeated downloads/parsing.
 ```{r step2_run_calibrate}
 core_config <- make_core_config()
-iot <- download_or_load_iot(core_config)
-wealth_init <- load_wealth_init(core_config)
-calib3 <- calibrate_sim_iot(iot, wealth_init)
+core_iot <- download_or_load_iot(core_config)
+core_wealth <- load_wealth_init(core_config)
+calib3 <- calibrate_sim_iot(core_iot, core_wealth)
 ```
 
 Run 20-year baseline simulation (no endogenous transition).
@@ -651,6 +661,48 @@ This gives the fitted no-transition reference path for Step 3.
 Use it as the comparison benchmark.
 ```{r step2_run_baseline}
 step2_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
+```
+
+Core play: fiscal stance in baseline (no transition).
+
+Change government spending growth while keeping transition switched off.
+Rerun the baseline and compare output with government debt dynamics.
+This isolates fiscal-policy effects before transition dynamics are introduced.
+```{r step2_play_core_fiscal}
+g_G_play <- 0.03  # @exercise[id=step2_gG;kind=core;question_expr=0.00;prompt="Change baseline government spending growth and compare GDP/debt paths";hint="Try 0.00, 0.01, 0.03"]
+step2_core_play <- simulate_sim_iot_endogenous(calib3, T = 20, g_G = g_G_play, transition_speed = 0)
+```
+
+Plot Step 2 core comparison.
+
+Plot GDP for baseline and fiscal-play runs in baseline mode.
+Add government debt to see the macro-financial trade-off.
+This is the key Step 2 policy comparison figure.
+```{r step2_plot_core, fig.height=4, fig.width=7}
+par(mfrow = c(1, 2))
+plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 2 Core: GDP")
+lines(step2_core_play$year, step2_core_play$GDP, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline", paste0("g_G=", g_G_play)), col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+plot(step2_baseline$year, step2_baseline$B, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "Gov debt B", main = "Step 2 Core: Debt")
+lines(step2_core_play$year, step2_core_play$B, lwd = 2, col = "firebrick")
+par(mfrow = c(1, 1))
+```
+
+Optional play: baseline wealth-consumption behavior.
+
+Change consumption out of wealth with transition still off.
+Rerun the baseline and inspect wealth-stock dynamics.
+This shows behavior-driven demand effects before adding transition pressure.
+```{r step2_play_optional_cv}
+c_v_baseline_play <- 0.06  # @exercise[id=step2_cv;kind=optional;question_expr=0.01;prompt="Change baseline c_v and inspect wealth and GDP without transition";hint="Keep transition_speed = 0"]
+step2_opt <- simulate_sim_iot_endogenous(calib3, T = 20, c_v = c_v_baseline_play, transition_speed = 0)
+
+ggplot2::ggplot(step2_opt, ggplot2::aes(year, V)) +
+  ggplot2::geom_line(linewidth = 1, color = "darkgreen") +
+  ggplot2::labs(title = "Step 2 Optional: household wealth path (no transition)", y = "V") +
+  ggplot2::theme_minimal()
 ```
 
 ### Interpretation
@@ -692,19 +744,22 @@ legend("topleft", legend = c("baseline (no transition)", paste0("play: ", transi
        col = c("steelblue", "firebrick"), lty = 1, bty = "n")
 ```
 
-Optional play: consumption out of wealth.
+Optional play: transition asymmetry / signal sensitivity.
 
-Change consumption out of wealth (`c_v`) under endogenous transition.
-Rerun with fixed transition speed and altered `c_v`.
-Inspect wealth dynamics under the transition setting.
-```{r step3_play_optional_cv}
-c_v_play <- 0.06  # @exercise[id=step3_cv;kind=optional;question_expr=0.01;prompt="Change c_v and inspect wealth and GDP trajectories";hint="High c_v can sustain higher demand but deplete wealth"]
-step3_opt <- simulate_sim_iot_endogenous(calib3, T = 20, c_v = c_v_play, transition_speed = 0.003)
+Change how strongly the transition rule reacts to sector-output signals.
+Rerun with the same transition speed but different signal weight.
+Inspect brown/green demand-share paths to see structural reallocation sensitivity.
+```{r step3_play_optional_signal}
+transition_signal_weight_play <- 1.8  # @exercise[id=step3_signal;kind=optional;question_expr=0.5;prompt="Change transition signal sensitivity and compare brown/green share dynamics";hint="Try 0.5, 1.0, 1.8"]
+step3_opt <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = transition_speed_play, transition_signal_weight = transition_signal_weight_play)
 
-ggplot2::ggplot(step3_opt, ggplot2::aes(year, V)) +
-  ggplot2::geom_line(linewidth = 1, color = "darkgreen") +
-  ggplot2::labs(title = "Step 3 Optional: household wealth path", y = "V") +
-  ggplot2::theme_minimal()
+plot(step3_play$year, step3_play$betaC_brown, type = "l", lwd = 2, col = "firebrick",
+     xlab = "year", ylab = "beta_C shares", main = "Step 3 Optional: signal sensitivity")
+lines(step3_opt$year, step3_opt$betaC_brown, lwd = 2, col = "firebrick", lty = 2)
+lines(step3_play$year, step3_play$betaC_green, lwd = 2, col = "darkgreen")
+lines(step3_opt$year, step3_opt$betaC_green, lwd = 2, col = "darkgreen", lty = 2)
+legend("right", legend = c("brown base", "brown play", "green base", "green play"),
+       col = c("firebrick", "firebrick", "darkgreen", "darkgreen"), lty = c(1, 2, 1, 2), bty = "n")
 ```
 
 ### Interpretation
@@ -831,14 +886,16 @@ simulate_sim_iot_row_lite <- function(calib,
 
 Build RoW-lite calibration and baseline path.
 
-Calibrate RoW-lite using the core IO and wealth data.
-Run the baseline path with zero transition speed.
-This provides the trade-balance reference.
+Reuse Step 2 calibration (no reload/reparse here).
+Run the RoW-lite baseline with zero transition speed.
+This provides the trade-balance reference with minimal extra runtime.
 ```{r step4_run_baseline}
-core_config <- make_core_config()
-iot <- download_or_load_iot(core_config)
-wealth_init <- load_wealth_init(core_config)
-calib4 <- calibrate_sim_iot_row(iot, wealth_init)
+if (!exists("calib4", inherits = FALSE)) {
+  core_config <- make_core_config()
+  core_iot <- download_or_load_iot(core_config)
+  core_wealth <- load_wealth_init(core_config)
+  calib4 <- calibrate_sim_iot_row(core_iot, core_wealth)
+}
 step4_baseline <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0)
 ```
 
@@ -897,7 +954,11 @@ Use the same loaded IOT structure to run an exogenous 20-year energy transition 
 - Exogenous transition targets enter as `eps_green` and `eps_brown`
 
 ```{r step5_run_load_iot}
-iot <- download_or_load_iot(core_config)
+if (!exists("core_iot", inherits = FALSE)) {
+  core_config <- make_core_config()
+  core_iot <- download_or_load_iot(core_config)
+}
+iot <- core_iot
 c(country = iot$country, year = iot$base_year, n_sectors = iot$n)
 ```
 

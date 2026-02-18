@@ -63,11 +63,11 @@ Each step should have one core play and one optional play, framed as an economic
   - Core play: compare convergence when initial GDP starts below versus above steady state.
   - Optional play: change consumption out of wealth and discuss effects on convergence speed and stability.
 - Step 2 (SIM + IOT baseline fit, core):
-  - Core play: adjust government growth or tax assumptions and compare the no-transition baseline path.
-  - Optional play: change household propensity to consume from wealth and inspect baseline wealth/GDP dynamics.
+  - Core play: adjust government spending growth and compare no-transition GDP and government-debt paths.
+  - Optional play: change household consumption out of wealth and inspect baseline wealth/GDP dynamics.
 - Step 3 (endogenous transition, core):
   - Core play: change endogenous transition pressure/speed and compare macro path and sector reallocation.
-  - Optional play: vary household propensity to consume from wealth under transition and discuss growth versus wealth-depletion trade-offs.
+  - Optional play: vary transition signal sensitivity (asymmetry) and compare brown/green demand-share dynamics.
 - Step 4 (RoW-lite, core):
   - Core play: change import leakage and compare GDP and trade-balance dynamics.
   - Optional play: change export growth and compare external-demand-led versus domestic-demand-led growth paths.
