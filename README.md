@@ -10,8 +10,7 @@ Minimal SFC-IO tutorial in Quarto (`tutorial_sfc-io.qmd`).
 
 1. Open the Binder link.
 2. Wait for RStudio to start.
-3. Run:
-   `quarto render tutorial_sfc-io.qmd --to html`
+3. Open `tutorial_sfc-io.qmd` and run R chunks directly in RStudio.
 
 ### Option 2: Static HTML (GitHub Pages)
 
@@ -27,8 +26,8 @@ If R + Quarto are already installed:
 3. Generate derived R files from the canonical `.qmd`:
    `Rscript build_tutorial.R --generate-r --generate-step-r`
 4. Choose one workflow:
-   - Run `.qmd` directly: open `tutorial_sfc-io.qmd` and run R chunks in RStudio (yes, RStudio can run `.qmd` R cells), or click **Render**.
-   - Run generated `.R` scripts: open and run `R/tutorial_sfc-io.R` (full script) or any step file such as `R/step02_iot_exogenous.R`.
+   - Run `.qmd` directly: open `tutorial_sfc-io.qmd` and run R chunks in RStudio (or click **Render**).
+   - Run generated `.R` scripts: open and run `R/tutorial_sfc-io.R` or any step file such as `R/step02_iot_exogenous.R`.
 
 ## Notes
 

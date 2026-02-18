@@ -1,5 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-
-Rscript .binder/install.R
-Rscript -e "if (!quarto::quarto_available()) quarto::quarto_install()"
