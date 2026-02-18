@@ -1,4 +1,7 @@
-The 30 min tutorial introduce Stock Flow Consistent (SFC) modelling with production sector based on an Input-Output Table (IOT)
+## SFC-IO tutorial design document
+This is the design document for a 30 min tutorial introducing Stock Flow Consistent (SFC) modelling with production sector based on an Input-Output Table (IOT), exogeneous and endogenous energy transition and CO2 emissions computations.
+
+## Single source .qmd, and its derivatives
 
 We start only with R code until the repo is fully refactored as per this design doc.
 Only after that we'll try to add in Python. So for now, the Python information below is to be ignored.
@@ -14,6 +17,8 @@ The .qmd should specify sections and slides in a user-friendly way, so that the 
 R and Python files created as above should match exactly the .qmd code and output when run independently by the user.
 
 For a slide-show tutorial, html and Reveal.js files are created as single standalone files to present so we that don't have file bloat. R code and Python code are displayed side by side in the html and slides and .qmd, or below each other if not easy or not readable. Points, equations and derivations from the slides are included as comments into R and Python files.
+
+## Progressive steps:
 
 We want the following progressive steps in the tutorial. Each is a separate section of the tutorial. These are all part of one .qmd file, but create separate R and Python files for each section. Earlier section files use functions, so that we can source earlier files' functions in the current file to emphasize code reuse and avoid duplication and divergence (if needed). 
 For R files we have a main function, with  `if (!interactive()) {  main() }`, so that `source`-ing the file into a later step/section won't run the code and plots already explored/seen in the previous step.

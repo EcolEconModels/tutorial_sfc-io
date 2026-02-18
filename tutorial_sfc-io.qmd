@@ -27,54 +27,42 @@ Build commands:
 
 Required packages: `jsonlite`, `ggplot2`.
 
-```{r shared_setup}
+These setup chunks keep only minimal imports/options/config (no model logic).
+
+
+This chunk checks required packages and plotting defaults.
+
+```{r setup_packages}
 required_packages <- c("jsonlite", "ggplot2")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing_packages) > 0) {
-  stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
-}
+if (length(missing_packages) > 0) stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
+options(device = function(...) grDevices::pdf(file = file.path(tempdir(), "Rplots.pdf"), ...))
+```
 
-# -----------------------------
-# Config (editable at top)
-# -----------------------------
-# Environment overrides are supported for scripted runs:
-# SFC_IO_COUNTRY, SFC_IO_YEAR, SFC_IO_SCOPE, SFC_IO_TABLE_TYPE
-# SFC_EMIS_COUNTRY, SFC_EMIS_YEAR, SFC_EMIS_SCOPE, SFC_EMIS_TABLE_TYPE, SFC_EMIS_AIRPOL
+This chunk defines the core configuration used in Steps 1-4.
 
+```{r setup_core_config}
+# Environment overrides: SFC_IO_COUNTRY, SFC_IO_YEAR, SFC_IO_SCOPE, SFC_IO_TABLE_TYPE
 core_config <- list(
-  country = Sys.getenv("SFC_IO_COUNTRY", "AT"),
-  year = as.integer(Sys.getenv("SFC_IO_YEAR", "2020")),
-  scope = Sys.getenv("SFC_IO_SCOPE", "TOTAL"),
-  table_type = Sys.getenv("SFC_IO_TABLE_TYPE", "product_by_product"),
-  freq = "A",
-  iot_unit = "MIO_EUR",
-  wealth_unit = "MIO_EUR",
-  wealth_co_nco = "NCO",
-  wealth_na_item = "BF90",
-  wealth_finpos = "LIAB",
-  emissions_airpol = "CO2",
-  emissions_unit = "THS_T",
-  cache_dir = "data",
-  enforce_co2_consistency = FALSE
+  country = Sys.getenv("SFC_IO_COUNTRY", "AT"), year = as.integer(Sys.getenv("SFC_IO_YEAR", "2020")),
+  scope = Sys.getenv("SFC_IO_SCOPE", "TOTAL"), table_type = Sys.getenv("SFC_IO_TABLE_TYPE", "product_by_product"),
+  freq = "A", iot_unit = "MIO_EUR", wealth_unit = "MIO_EUR",
+  wealth_co_nco = "NCO", wealth_na_item = "BF90", wealth_finpos = "LIAB",
+  emissions_airpol = "CO2", emissions_unit = "THS_T", cache_dir = "data", enforce_co2_consistency = FALSE
 )
+```
 
+This chunk defines the emissions configuration used in Step 5.
+
+```{r setup_emissions_config}
+# Environment overrides: SFC_EMIS_COUNTRY, SFC_EMIS_YEAR, SFC_EMIS_SCOPE, SFC_EMIS_TABLE_TYPE, SFC_EMIS_AIRPOL
 emissions_config <- list(
-  country = Sys.getenv("SFC_EMIS_COUNTRY", "BE"),
-  year = as.integer(Sys.getenv("SFC_EMIS_YEAR", "2020")),
-  scope = Sys.getenv("SFC_EMIS_SCOPE", "TOTAL"),
-  table_type = Sys.getenv("SFC_EMIS_TABLE_TYPE", "industry_by_industry"),
-  freq = "A",
-  iot_unit = "MIO_EUR",
-  wealth_unit = "MIO_EUR",
-  wealth_co_nco = "NCO",
-  wealth_na_item = "BF90",
-  wealth_finpos = "LIAB",
-  emissions_airpol = Sys.getenv("SFC_EMIS_AIRPOL", "CO2"),
-  emissions_unit = "THS_T",
-  cache_dir = "data",
-  enforce_co2_consistency = TRUE
+  country = Sys.getenv("SFC_EMIS_COUNTRY", "BE"), year = as.integer(Sys.getenv("SFC_EMIS_YEAR", "2020")),
+  scope = Sys.getenv("SFC_EMIS_SCOPE", "TOTAL"), table_type = Sys.getenv("SFC_EMIS_TABLE_TYPE", "industry_by_industry"),
+  freq = "A", iot_unit = "MIO_EUR", wealth_unit = "MIO_EUR",
+  wealth_co_nco = "NCO", wealth_na_item = "BF90", wealth_finpos = "LIAB",
+  emissions_airpol = Sys.getenv("SFC_EMIS_AIRPOL", "CO2"), emissions_unit = "THS_T", cache_dir = "data", enforce_co2_consistency = TRUE
 )
-
 ```
 
 ## Step 1: SIM Closed Model (Lag and Current)
@@ -119,39 +107,36 @@ Implement the textbook SIM core in closed economy form and compare:
 
 Added only the macro behavioral block (no IOT yet).
 
-```{r step1_functions}
+This chunk defines `sim_steady_state()` for step1.
+
+```{r step1_functions_sim_steady_state}
 sim_steady_state <- function(G, theta, alpha1, alpha2) {
   Y_star <- G / theta
   H_star <- ((1 - alpha1) * (1 - theta) / alpha2) * Y_star
   list(Y_star = Y_star, H_star = H_star)
 }
 
-simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
-                             Y0 = 80, H0 = 300) {
-  out <- data.frame(
-    t = seq_len(T),
-    Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_
-  )
+```
 
-  YD_prev <- (1 - theta) * Y0
-  H_prev <- H0
+This chunk defines `simulate_sim_lag()` for step1.
 
+```{r step1_functions_simulate_sim_lag}
+simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2, Y0 = 80, H0 = 300) {
+  out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
+  YD_prev <- (1 - theta) * Y0; H_prev <- H0
   for (tt in seq_len(T)) {
-    C_t <- alpha1 * YD_prev + alpha2 * H_prev
-    Y_t <- C_t + G
-    T_t <- theta * Y_t
-    YD_t <- Y_t - T_t
-    H_t <- H_prev + YD_t - C_t
-
+    C_t <- alpha1 * YD_prev + alpha2 * H_prev; Y_t <- C_t + G
+    T_t <- theta * Y_t; YD_t <- Y_t - T_t; H_t <- H_prev + YD_t - C_t
     out[tt, c("Y", "T_tax", "YD", "C", "H")] <- c(Y_t, T_t, YD_t, C_t, H_t)
-
-    YD_prev <- YD_t
-    H_prev <- H_t
+    YD_prev <- YD_t; H_prev <- H_t
   }
-
   out
 }
+```
 
+This chunk defines `simulate_sim_current_fp()` for step1.
+
+```{r step1_functions_simulate_sim_current_fp, echo: false}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
                                     Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
   out <- data.frame(
@@ -190,41 +175,50 @@ simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, 
 }
 ```
 
-```{r step1_run}
-T_h <- 20
-pars <- list(G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2)
+This walkthrough chunk summarizes `simulate_sim_current_fp()` logic in small steps.
+
+
+This chunk runs `step1_walk_simulate_sim_current_fp`.
+
+```{r step1_walk_simulate_sim_current_fp}
+# Outline for simulate_sim_current_fp()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+
+This chunk runs step1 and produces the step outputs.
+
+```{r step1_run_setup}
+T_h <- 20; pars <- list(G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2)
 ss <- sim_steady_state(pars$G, pars$theta, pars$alpha1, pars$alpha2)
-
-Y0_low <- 0.7 * ss$Y_star
-Y0_high <- 1.3 * ss$Y_star
-
-H0_from_Y <- function(Y0, G, theta, alpha1, alpha2) {
-  (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
-}
-
+Y0_low <- 0.7 * ss$Y_star; Y0_high <- 1.3 * ss$Y_star
+H0_from_Y <- function(Y0, G, theta, alpha1, alpha2) (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
 H0_low <- H0_from_Y(Y0_low, pars$G, pars$theta, pars$alpha1, pars$alpha2)
 H0_high <- H0_from_Y(Y0_high, pars$G, pars$theta, pars$alpha1, pars$alpha2)
+```
 
-lag_low <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                            Y0 = Y0_low, H0 = H0_low)
-lag_high <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                             Y0 = Y0_high, H0 = H0_high)
-cur_low <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                                   Y0 = Y0_low, H0 = H0_low)
-cur_high <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2,
-                                    Y0 = Y0_high, H0 = H0_high)
+This chunk runs both SIM variants and assembles comparable GDP paths.
 
+```{r step1_run_paths}
+lag_low <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2, Y0 = Y0_low, H0 = H0_low)
+lag_high <- simulate_sim_lag(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2, Y0 = Y0_high, H0 = H0_high)
+cur_low <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2, Y0 = Y0_low, H0 = H0_low)
+cur_high <- simulate_sim_current_fp(T = T_h, G = pars$G, theta = pars$theta, alpha1 = pars$alpha1, alpha2 = pars$alpha2, Y0 = Y0_high, H0 = H0_high)
 step1_paths <- rbind(
   data.frame(t = lag_low$t, Y = lag_low$Y, path = "SIM-lag (low start)"),
   data.frame(t = lag_high$t, Y = lag_high$Y, path = "SIM-lag (high start)"),
   data.frame(t = cur_low$t, Y = cur_low$Y, path = "SIM-current (low start)"),
   data.frame(t = cur_high$t, Y = cur_high$Y, path = "SIM-current (high start)")
 )
-
 step1_paths$year <- core_config$year + step1_paths$t - 1
-
 tail(step1_paths)
 ```
+
+This chunk plots results for step1.
 
 ```{r step1_plot, fig.height=4, fig.width=7}
 ggplot2::ggplot(step1_paths, ggplot2::aes(year, Y, color = path)) +
@@ -260,9 +254,15 @@ Load SIOT for the core configuration (default: Austria 2020, product-by-product,
 
 Added sectoral production block and closure logic. Household/government behavior is still not endogenized here.
 
-```{r step2_functions}
-source("closure_utils.R")
+This chunk loads closure utilities used by the Step 2 transition solver.
 
+```{r step2_closure_setup}
+source("closure_utils.R")
+```
+
+This chunk defines `validate_tutorial_config()` for step2.
+
+```{r step2_functions_validate_tutorial_config}
 validate_tutorial_config <- function(cfg) {
   valid_scope <- c("TOTAL", "DOM")
   valid_table_type <- c("industry_by_industry", "product_by_product")
@@ -274,17 +274,15 @@ validate_tutorial_config <- function(cfg) {
     stop("Invalid table_type: ", cfg$table_type, ". Use one of: ", paste(valid_table_type, collapse = ", "), call. = FALSE)
   }
 
-  if (identical(cfg$table_type, "product_by_product") && isTRUE(cfg$enforce_co2_consistency)) {
-    stop(
-      "Configuration not supported: product_by_product with enforced CO2 consistency. ",
-      "AEA emissions are by industries (NACE), not products.",
-      call. = FALSE
-    )
-  }
 
   invisible(TRUE)
 }
 
+```
+
+This chunk defines `as_numeric_clean()` for step2.
+
+```{r step2_functions_as_numeric_clean}
 as_numeric_clean <- function(x) {
   y <- gsub(",", "", as.character(x), fixed = TRUE)
   y <- gsub(" ", "", y, fixed = TRUE)
@@ -292,6 +290,11 @@ as_numeric_clean <- function(x) {
   suppressWarnings(as.numeric(y))
 }
 
+```
+
+This chunk defines `safe_div()` for step2.
+
+```{r step2_functions_safe_div}
 safe_div <- function(num, den, default = 0) {
   out <- rep(default, length(num))
   ok <- is.finite(num) & is.finite(den) & den != 0
@@ -299,15 +302,30 @@ safe_div <- function(num, den, default = 0) {
   out
 }
 
+```
+
+This chunk defines `ensure_cache_dir()` for step2.
+
+```{r step2_functions_ensure_cache_dir}
 ensure_cache_dir <- function(cache_dir = "data") {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
   cache_dir
 }
 
+```
+
+This chunk defines `sanitize_for_filename()` for step2.
+
+```{r step2_functions_sanitize_for_filename}
 sanitize_for_filename <- function(x) {
   gsub("[^A-Za-z0-9_\\-]", "_", x)
 }
 
+```
+
+This chunk defines `cache_file_for_query()` for step2.
+
+```{r step2_functions_cache_file_for_query}
 cache_file_for_query <- function(dataset_id, params, cache_dir) {
   key_parts <- character(0)
   for (nm in names(params)) {
@@ -319,39 +337,41 @@ cache_file_for_query <- function(dataset_id, params, cache_dir) {
   file.path(cache_dir, paste0(dataset_id, '__', sanitize_for_filename(key), '.json'))
 }
 
-fetch_eurostat_json <- function(dataset_id, params, cache_dir = 'data') {
-  cache_dir <- ensure_cache_dir(cache_dir)
-  cache_file <- cache_file_for_query(dataset_id, params, cache_dir)
+```
 
-  if (file.exists(cache_file)) {
-    return(jsonlite::read_json(cache_file, simplifyVector = FALSE))
-  }
+This chunk defines `fetch_eurostat_json()` for step2.
 
-  query_parts <- character(0)
+This chunk builds URL query parts for Eurostat API requests.
+
+```{r step2_functions_build_query_parts}
+build_query_parts <- function(params) {
+  q <- character(0)
   for (nm in names(params)) {
-    vv <- params[[nm]]
-    if (length(vv) == 0) next
-    for (v in vv) {
-      query_parts <- c(query_parts, paste0(nm, '=', utils::URLencode(as.character(v), reserved = TRUE)))
-    }
+    vv <- params[[nm]]; if (length(vv) == 0) next
+    for (v in vv) q <- c(q, paste0(nm, "=", utils::URLencode(as.character(v), reserved = TRUE)))
   }
+  q
+}
+```
 
-  base <- 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data'
-  query <- paste(query_parts, collapse = '&')
-  url <- paste0(base, '/', dataset_id, '?', query)
 
-  ok <- tryCatch({
-    utils::download.file(url, destfile = cache_file, mode = 'wb', quiet = TRUE)
-    TRUE
-  }, error = function(e) FALSE)
+This chunk fetches Eurostat JSON (cache-first, download fallback).
 
-  if (!ok || !file.exists(cache_file)) {
-    stop('Eurostat download failed for ', dataset_id, '. URL: ', url, call. = FALSE)
-  }
-
+```{r step2_functions_fetch_eurostat_json}
+fetch_eurostat_json <- function(dataset_id, params, cache_dir = "data") {
+  cache_dir <- ensure_cache_dir(cache_dir); cache_file <- cache_file_for_query(dataset_id, params, cache_dir)
+  if (file.exists(cache_file)) return(jsonlite::read_json(cache_file, simplifyVector = FALSE))
+  base <- "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
+  url <- paste0(base, "/", dataset_id, "?", paste(build_query_parts(params), collapse = "&"))
+  ok <- tryCatch({ utils::download.file(url, destfile = cache_file, mode = "wb", quiet = TRUE); TRUE }, error = function(e) FALSE)
+  if (!ok || !file.exists(cache_file)) stop("Eurostat download failed for ", dataset_id, ". URL: ", url, call. = FALSE)
   jsonlite::read_json(cache_file, simplifyVector = FALSE)
 }
+```
 
+This chunk defines `ordered_categories()` for step2.
+
+```{r step2_functions_ordered_categories}
 ordered_categories <- function(dim_obj) {
   raw_idx <- unlist(dim_obj[["category"]][["index"]])
   pos <- as.integer(raw_idx)
@@ -366,6 +386,11 @@ ordered_categories <- function(dim_obj) {
   data.frame(code = codes, label = labels, stringsAsFactors = FALSE)
 }
 
+```
+
+This chunk defines `decode_jsonstat_index()` for step2.
+
+```{r step2_functions_decode_jsonstat_index}
 decode_jsonstat_index <- function(flat0, sizes) {
   k <- length(sizes)
   pos <- integer(k)
@@ -378,70 +403,45 @@ decode_jsonstat_index <- function(flat0, sizes) {
   pos
 }
 
+```
+
+This chunk defines `extract_matrix_from_json()` for step2.
+
+```{r step2_functions_extract_matrix_from_json}
 extract_matrix_from_json <- function(js, row_dim, col_dim) {
-  ids <- unlist(js[["id"]])
-  sizes <- as.integer(unlist(js[["size"]]))
-
-  row_i <- match(row_dim, ids)
-  col_i <- match(col_dim, ids)
-
-  if (is.na(row_i) || is.na(col_i)) {
-    stop("Could not find row/col dimensions in dataset.", call. = FALSE)
-  }
-
-  row_cat <- ordered_categories(js[["dimension"]][[row_dim]])
-  col_cat <- ordered_categories(js[["dimension"]][[col_dim]])
-
-  vals <- unlist(js[["value"]])
-  if (length(vals) == 0) {
-    stop("No observations in returned dataset for requested filters.", call. = FALSE)
-  }
-
-  M <- matrix(NA_real_, nrow = nrow(row_cat), ncol = nrow(col_cat))
-  flat_idx <- as.integer(names(vals))
-
+  ids <- unlist(js[["id"]]); sizes <- as.integer(unlist(js[["size"]]))
+  row_i <- match(row_dim, ids); col_i <- match(col_dim, ids)
+  if (is.na(row_i) || is.na(col_i)) stop("Could not find row/col dimensions in dataset.", call. = FALSE)
+  row_cat <- ordered_categories(js[["dimension"]][[row_dim]]); col_cat <- ordered_categories(js[["dimension"]][[col_dim]])
+  vals <- unlist(js[["value"]]); if (length(vals) == 0) stop("No observations in returned dataset for requested filters.", call. = FALSE)
+  M <- matrix(NA_real_, nrow = nrow(row_cat), ncol = nrow(col_cat)); flat_idx <- as.integer(names(vals))
   for (j in seq_along(flat_idx)) {
-    pos <- decode_jsonstat_index(flat_idx[j], sizes)
-    rr <- pos[row_i] + 1L
-    cc <- pos[col_i] + 1L
-    M[rr, cc] <- as.numeric(vals[[j]])
+    pos <- decode_jsonstat_index(flat_idx[j], sizes); rr <- pos[row_i] + 1L; cc <- pos[col_i] + 1L; M[rr, cc] <- as.numeric(vals[[j]])
   }
-
   list(M = M, row_cat = row_cat, col_cat = col_cat, ids = ids, sizes = sizes)
 }
+```
 
+This chunk defines `extract_values_by_dim()` for step2.
+
+```{r step2_functions_extract_values_by_dim}
 extract_values_by_dim <- function(js, dim_name) {
-  ids <- unlist(js[["id"]])
-  sizes <- as.integer(unlist(js[["size"]]))
-  dim_i <- match(dim_name, ids)
+  ids <- unlist(js[["id"]]); sizes <- as.integer(unlist(js[["size"]])); dim_i <- match(dim_name, ids)
   if (is.na(dim_i)) stop("Dimension not found: ", dim_name, call. = FALSE)
-
   cat_tbl <- ordered_categories(js[["dimension"]][[dim_name]])
-  vals <- unlist(js[["value"]])
-  if (length(vals) == 0) return(setNames(numeric(0), character(0)))
-
-  out <- rep(NA_real_, nrow(cat_tbl))
-  names(out) <- cat_tbl$code
-
-  flat_idx <- as.integer(names(vals))
+  vals <- unlist(js[["value"]]); if (length(vals) == 0) return(setNames(numeric(0), character(0)))
+  out <- rep(NA_real_, nrow(cat_tbl)); names(out) <- cat_tbl$code; flat_idx <- as.integer(names(vals))
   for (j in seq_along(flat_idx)) {
-    pos <- decode_jsonstat_index(flat_idx[j], sizes)
-    key <- cat_tbl$code[pos[dim_i] + 1L]
-    out[key] <- as.numeric(vals[[j]])
+    pos <- decode_jsonstat_index(flat_idx[j], sizes); key <- cat_tbl$code[pos[dim_i] + 1L]; out[key] <- as.numeric(vals[[j]])
   }
-
   out
 }
+```
 
-normalize_nace_code <- function(x) {
-  y <- toupper(as.character(x))
-  y <- gsub("-", "_", y)
-  y <- gsub("\\.", "", y)
-  # C10_12 -> C10_C12, E37_39 -> E37_E39, etc.
-  y <- gsub("^([A-Z])(\\d{2})_(\\d{2})$", "\\1\\2_\\1\\3", y, perl = TRUE)
-  y
-}
 
+This chunk defines `iot_schema()` for step2.
+
+```{r step2_functions_iot_schema}
 iot_schema <- function(table_type) {
   if (identical(table_type, "industry_by_industry")) {
     list(dataset_id = "naio_10_cp1750", row_dim = "ind_ava", col_dim = "ind_use")
@@ -450,6 +450,11 @@ iot_schema <- function(table_type) {
   }
 }
 
+```
+
+This chunk defines `sum_matching_cols()` for step2.
+
+```{r step2_functions_sum_matching_cols}
 sum_matching_cols <- function(M, col_codes, col_labels, patterns, default = 0) {
   hit <- logical(length(col_codes))
   for (p in patterns) {
@@ -461,263 +466,126 @@ sum_matching_cols <- function(M, col_codes, col_labels, patterns, default = 0) {
   rowSums(M[, hit, drop = FALSE], na.rm = TRUE)
 }
 
+```
+
+This chunk defines `select_sector_codes()` for step2.
+
+```{r step2_functions_select_sector_codes}
 select_sector_codes <- function(row_codes, col_codes, x_by_row) {
-  exclude_codes <- c(
-    "TOTAL", "TU", "TFU", "TS_BP", "IMP",
-    "B1G", "B2A3N", "B2A3G", "B3G", "P1", "P2_ADJ", "D21X31",
-    "P7", "P7_B0", "P7_D0", "P7_U2", "P7_U3"
-  )
-
-  candidate <- intersect(row_codes, col_codes)
-  candidate <- setdiff(candidate, exclude_codes)
-
-  # Keep rows with finite/non-trivial total use
+  exclude_codes <- c("TOTAL", "TU", "TFU", "TS_BP", "IMP", "B1G", "B2A3N", "B2A3G", "B3G", "P1", "P2_ADJ", "D21X31", "P7", "P7_B0", "P7_D0", "P7_U2", "P7_U3")
+  candidate <- setdiff(intersect(row_codes, col_codes), exclude_codes)
   valid_x <- names(x_by_row)[is.finite(x_by_row) & x_by_row > 1e-9]
   candidate <- intersect(candidate, valid_x)
-
-  if (length(candidate) < 20) {
-    stop("Could not identify sector set from IOT matrix.", call. = FALSE)
-  }
-
+  if (length(candidate) < 20) stop("Could not identify sector set from IOT matrix.", call. = FALSE)
   candidate
 }
+```
 
-get_aea_codes <- function(cfg) {
-  params <- list(
-    freq = cfg$freq,
-    airpol = cfg$emissions_airpol,
-    unit = cfg$emissions_unit,
-    geo = cfg$country,
-    time = as.character(cfg$year)
+
+This chunk prepares row/column metadata and sector selection from the SIOT matrix.
+
+```{r step2_functions_prepare_iot_selection}
+prepare_iot_selection <- function(mat) {
+  row_codes <- mat$row_cat$code; row_labels <- mat$row_cat$label
+  col_codes <- mat$col_cat$code; col_labels <- mat$col_cat$label
+  tu_col <- match("TU", col_codes); if (is.na(tu_col)) tu_col <- match("TOTAL", col_codes)
+  if (is.na(tu_col)) stop("Could not find TU/TOTAL use column in IOT data.", call. = FALSE)
+  x_by_row <- mat$M[, tu_col]; names(x_by_row) <- row_codes
+  sector_codes <- select_sector_codes(row_codes, col_codes, x_by_row)
+  r_idx <- match(sector_codes, row_codes); c_idx <- match(sector_codes, col_codes)
+  list(
+    row_codes = row_codes, row_labels = row_labels,
+    col_codes = col_codes, col_labels = col_labels,
+    x_by_row = x_by_row, sector_codes = sector_codes,
+    r_idx = r_idx, c_idx = c_idx
   )
-  js <- fetch_eurostat_json("env_ac_ainah_r2", params, cache_dir = cfg$cache_dir)
-  code_tbl <- ordered_categories(js[["dimension"]][["nace_r2"]])
-  code_tbl$norm <- normalize_nace_code(code_tbl$code)
-
-  val_by_code <- extract_values_by_dim(js, "nace_r2")
-  nz_codes <- names(val_by_code)[is.finite(val_by_code) & !is.na(val_by_code)]
-  nz_norm <- normalize_nace_code(nz_codes)
-  unique(nz_norm)
 }
+```
 
+This chunk computes `Z`, `A`, and `L` for the selected sectors.
+
+```{r step2_functions_compute_iot_technology}
+compute_iot_technology <- function(mat, sel) {
+  Z <- mat$M[sel$r_idx, sel$c_idx, drop = FALSE]
+  x0 <- as.numeric(sel$x_by_row[sel$sector_codes]); names(x0) <- sel$sector_codes
+  x_safe <- x0; x_safe[!is.finite(x_safe) | x_safe <= 0] <- 1e-9
+  A0 <- sweep(Z, 2, x_safe, "/"); A0[!is.finite(A0)] <- 0
+  L0 <- tryCatch(
+    solve(diag(length(sel$sector_codes)) - A0),
+    error = function(e) solve(diag(length(sel$sector_codes)) - A0 + diag(1e-8, length(sel$sector_codes)))
+  )
+  list(Z = Z, x0 = x0, A0 = A0, L0 = L0)
+}
+```
+
+This chunk extracts final-demand shares, import leakage, and value-added coefficients.
+
+```{r step2_functions_extract_iot_fd}
+extract_iot_fd <- function(mat, sel, tech) {
+  Msel <- mat$M[sel$r_idx, , drop = FALSE]
+  C_i0 <- sum_matching_cols(Msel, sel$col_codes, sel$col_labels, c("^P3_S14$", "households"))
+  C_i0 <- C_i0 + sum_matching_cols(Msel, sel$col_codes, sel$col_labels, c("^P3_S15$", "NPISH"))
+  G_i0 <- sum_matching_cols(Msel, sel$col_codes, sel$col_labels, c("^P3_S13$", "government"))
+  I_i0 <- sum_matching_cols(Msel, sel$col_codes, sel$col_labels, c("^P51G$", "^P52$", "^P53$", "^P5$", "gross capital"))
+  EX_i0 <- sum_matching_cols(Msel, sel$col_codes, sel$col_labels, c("^P6$", "^P6_", "exports"))
+  imp_row <- which(sel$row_codes %in% c("P7", "IMP")); if (length(imp_row) == 0) imp_row <- grep("imports", sel$row_labels, ignore.case = TRUE)
+  imports_i <- if (length(imp_row) > 0) as.numeric(mat$M[imp_row[1], sel$c_idx, drop = TRUE]) else rep(0, length(sel$sector_codes))
+  m_i <- pmin(pmax(safe_div(imports_i, tech$x0), 0), 0.95)
+  va_row <- which(sel$row_codes == "B1G")
+  va_coeff <- if (length(va_row) > 0) safe_div(as.numeric(mat$M[va_row[1], sel$c_idx, drop = TRUE]), tech$x0) else pmax(1 - colSums(tech$A0, na.rm = TRUE), 0)
+  va_coeff[!is.finite(va_coeff) | va_coeff < 0] <- 0
+  beta_C <- safe_div(C_i0, rep(sum(C_i0), length(C_i0))); beta_G <- safe_div(G_i0, rep(sum(G_i0), length(G_i0)))
+  if (sum(beta_C) > 0) beta_C <- beta_C / sum(beta_C); if (sum(beta_G) > 0) beta_G <- beta_G / sum(beta_G)
+  list(C_i0 = C_i0, G_i0 = G_i0, I_i0 = I_i0, EX_i0 = EX_i0, m_i = m_i, va_coeff = va_coeff, beta_C = beta_C, beta_G = beta_G)
+}
+```
+
+This chunk defines `download_or_load_iot()` for step2.
+
+```{r step2_functions_download_or_load_iot, echo: false}
 download_or_load_iot <- function(cfg) {
   schema <- iot_schema(cfg$table_type)
-
-  params <- list(
-    freq = cfg$freq,
-    unit = cfg$iot_unit,
-    stk_flow = cfg$scope,
-    geo = cfg$country,
-    time = as.character(cfg$year)
-  )
-
+  params <- list(freq = cfg$freq, unit = cfg$iot_unit, stk_flow = cfg$scope, geo = cfg$country, time = as.character(cfg$year))
   js <- fetch_eurostat_json(schema$dataset_id, params, cache_dir = cfg$cache_dir)
   mat <- tryCatch(
     extract_matrix_from_json(js, schema$row_dim, schema$col_dim),
-    error = function(e) {
-      stop(
-        'No IOT data for requested configuration: country=', cfg$country,
-        ', year=', cfg$year,
-        ', scope=', cfg$scope,
-        ', table_type=', cfg$table_type,
-        '. ', e$message,
-        call. = FALSE
-      )
-    }
-  )
-
-  row_codes <- mat$row_cat$code
-  row_labels <- mat$row_cat$label
-  col_codes <- mat$col_cat$code
-  col_labels <- mat$col_cat$label
-
-  tu_col <- match("TU", col_codes)
-  if (is.na(tu_col)) {
-    tu_col <- match("TOTAL", col_codes)
-  }
-  if (is.na(tu_col)) {
-    stop("Could not find TU/TOTAL use column in IOT data.", call. = FALSE)
-  }
-
-  x_by_row <- mat$M[, tu_col]
-  names(x_by_row) <- row_codes
-
-  sector_codes <- select_sector_codes(row_codes, col_codes, x_by_row)
-
-  # If emissions consistency is requested, keep only sectors with AEA coverage
-  if (isTRUE(cfg$enforce_co2_consistency)) {
-    if (!identical(cfg$table_type, "industry_by_industry")) {
-      stop("CO2 consistency requires industry_by_industry mode.", call. = FALSE)
-    }
-    aea_norm <- get_aea_codes(cfg)
-    sec_norm <- normalize_nace_code(sector_codes)
-    keep <- sec_norm %in% aea_norm
-    sector_codes <- sector_codes[keep]
-    if (length(sector_codes) < 20) {
-      stop(
-        "Requested configuration has insufficient overlap between IOT sectors and AEA sectors. ",
-        "Check country/year/scope/table_type.",
-        call. = FALSE
-      )
-    }
-  }
-
-  r_idx <- match(sector_codes, row_codes)
-  c_idx <- match(sector_codes, col_codes)
-
-  Z <- mat$M[r_idx, c_idx, drop = FALSE]
-  x0 <- as.numeric(x_by_row[sector_codes])
-  names(x0) <- sector_codes
-
-  x_safe <- x0
-  x_safe[!is.finite(x_safe) | x_safe <= 0] <- 1e-9
-
-  A0 <- sweep(Z, 2, x_safe, "/")
-  A0[!is.finite(A0)] <- 0
-
-  L0 <- tryCatch(
-    solve(diag(length(sector_codes)) - A0),
-    error = function(e) solve(diag(length(sector_codes)) - A0 + diag(1e-8, length(sector_codes)))
-  )
-
-  # Final demand components
-  C_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P3_S14$", "households"))
-  C_i0 <- C_i0 + sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P3_S15$", "NPISH"))
-  G_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P3_S13$", "government"))
-
-  I_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P51G$", "^P52$", "^P53$", "^P5$", "gross capital"))
-  EX_i0 <- sum_matching_cols(mat$M[r_idx, , drop = FALSE], col_codes, col_labels, c("^P6$", "^P6_", "exports"))
-
-  # Imports row for leakage proxy
-  imp_row <- which(row_codes %in% c("P7", "IMP"))
-  if (length(imp_row) == 0) {
-    imp_row <- grep("imports", row_labels, ignore.case = TRUE)
-  }
-  imports_i <- if (length(imp_row) > 0) {
-    as.numeric(mat$M[imp_row[1], c_idx, drop = TRUE])
-  } else {
-    rep(0, length(sector_codes))
-  }
-  m_i <- pmin(pmax(safe_div(imports_i, x0), 0), 0.95)
-
-  # Value added coefficient: prefer B1G row if available, else 1 - column sum(A)
-  va_row <- which(row_codes == "B1G")
-  va_coeff <- if (length(va_row) > 0) {
-    va_val <- as.numeric(mat$M[va_row[1], c_idx, drop = TRUE])
-    safe_div(va_val, x0)
-  } else {
-    pmax(1 - colSums(A0, na.rm = TRUE), 0)
-  }
-  va_coeff[!is.finite(va_coeff) | va_coeff < 0] <- 0
-
-  beta_C <- safe_div(C_i0, rep(sum(C_i0), length(C_i0)))
-  beta_G <- safe_div(G_i0, rep(sum(G_i0), length(G_i0)))
-
-  if (sum(beta_C) > 0) beta_C <- beta_C / sum(beta_C)
-  if (sum(beta_G) > 0) beta_G <- beta_G / sum(beta_G)
-
-  list(
-    base_year = cfg$year,
-    country = cfg$country,
-    scope = cfg$scope,
-    table_type = cfg$table_type,
-    dataset_id = schema$dataset_id,
-    n = length(sector_codes),
-    sector_codes = sector_codes,
-    sector_labels = row_labels[r_idx],
-    Z0 = Z,
-    A0 = A0,
-    L0 = L0,
-    x0 = x0,
-    C_i0 = C_i0,
-    G_i0 = G_i0,
-    I_i0 = I_i0,
-    EX_i0 = EX_i0,
-    F0 = C_i0 + G_i0 + I_i0 + EX_i0,
-    m_i = m_i,
-    va_coeff = va_coeff,
-    Y0 = sum(va_coeff * x0),
-    G0 = sum(G_i0),
-    beta_C = beta_C,
-    beta_G = beta_G
-  )
-}
-
-load_wealth_init <- function(cfg) {
-  params <- list(
-    freq = cfg$freq,
-    unit = cfg$wealth_unit,
-    co_nco = cfg$wealth_co_nco,
-    sector = c("S13", "S14"),
-    finpos = cfg$wealth_finpos,
-    na_item = cfg$wealth_na_item,
-    geo = cfg$country,
-    time = as.character(cfg$year)
-  )
-
-  js <- fetch_eurostat_json("nasa_10_f_bs", params, cache_dir = cfg$cache_dir)
-  sector_vals <- extract_values_by_dim(js, "sector")
-
-  if (!("S14" %in% names(sector_vals)) || !("S13" %in% names(sector_vals))) {
-    stop("Wealth dataset missing S14 or S13 for selected configuration.", call. = FALSE)
-  }
-
-  hh_net_worth <- as.numeric(sector_vals[["S14"]])
-  gov_net_worth <- as.numeric(sector_vals[["S13"]])
-
-  if (!is.finite(hh_net_worth) || !is.finite(gov_net_worth)) {
-    stop("Wealth values are unavailable/non-finite for selected configuration.", call. = FALSE)
-  }
-
-  list(
-    V0 = hh_net_worth,
-    B0 = max(-gov_net_worth, 0)
-  )
-}
-
-load_aea_emissions <- function(cfg, sector_codes, x0) {
-  if (!identical(cfg$table_type, "industry_by_industry")) {
-    stop("AEA emissions are not directly available for product_by_product configuration.", call. = FALSE)
-  }
-
-  params <- list(
-    freq = cfg$freq,
-    airpol = cfg$emissions_airpol,
-    unit = cfg$emissions_unit,
-    geo = cfg$country,
-    time = as.character(cfg$year)
-  )
-
-  js <- fetch_eurostat_json("env_ac_ainah_r2", params, cache_dir = cfg$cache_dir)
-  aea_vals <- extract_values_by_dim(js, "nace_r2")
-
-  aea_norm <- normalize_nace_code(names(aea_vals))
-  names(aea_vals) <- aea_norm
-
-  sec_norm <- normalize_nace_code(sector_codes)
-  em_ths_t <- as.numeric(aea_vals[sec_norm])
-  names(em_ths_t) <- sector_codes
-
-  missing <- !is.finite(em_ths_t)
-  if (any(missing)) {
-    stop(
-      "CO2 emissions unavailable for sector code(s): ",
-      paste(sector_codes[missing], collapse = ", "),
-      ". Adjust configuration or disable strict consistency.",
+    error = function(e) stop(
+      "No IOT data for requested configuration: country=", cfg$country,
+      ", year=", cfg$year, ", scope=", cfg$scope, ", table_type=", cfg$table_type, ". ", e$message,
       call. = FALSE
     )
-  }
-
-  intensity_kg_per_meur <- safe_div(em_ths_t * 1e6, as.numeric(x0))
-  intensity_kg_per_meur[!is.finite(intensity_kg_per_meur)] <- 0
-
-  data.frame(
-    sector = sector_codes,
-    intensity_kg_per_meur = intensity_kg_per_meur,
-    stringsAsFactors = FALSE
+  )
+  sel <- prepare_iot_selection(mat)
+  tech <- compute_iot_technology(mat, sel)
+  fd <- extract_iot_fd(mat, sel, tech)
+  list(
+    base_year = cfg$year, country = cfg$country, scope = cfg$scope, table_type = cfg$table_type, dataset_id = schema$dataset_id,
+    n = length(sel$sector_codes), sector_codes = sel$sector_codes, sector_labels = sel$row_labels[sel$r_idx],
+    Z0 = tech$Z, A0 = tech$A0, L0 = tech$L0, x0 = tech$x0,
+    C_i0 = fd$C_i0, G_i0 = fd$G_i0, I_i0 = fd$I_i0, EX_i0 = fd$EX_i0,
+    F0 = fd$C_i0 + fd$G_i0 + fd$I_i0 + fd$EX_i0, m_i = fd$m_i, va_coeff = fd$va_coeff,
+    Y0 = sum(fd$va_coeff * tech$x0), G0 = sum(fd$G_i0), beta_C = fd$beta_C, beta_G = fd$beta_G
   )
 }
+```
 
+This walkthrough chunk summarizes `download_or_load_iot()` logic in small steps.
+
+
+This chunk runs `step2_walk_download_or_load_iot`.
+
+```{r step2_walk_download_or_load_iot}
+# Outline for download_or_load_iot()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+This chunk defines `find_energy_indices()` for step2.
+
+```{r step2_functions_find_energy_indices}
 find_energy_indices <- function(sector_codes, sector_labels) {
   # Industry mode defaults
   idx_brown <- match("C19", sector_codes)
@@ -734,6 +602,11 @@ find_energy_indices <- function(sector_codes, sector_labels) {
 }
 
 
+```
+
+This chunk defines `simulate_iot_exogenous_transition()` for step2.
+
+```{r step2_functions_simulate_iot_exogenous_transition, echo: false}
 simulate_iot_exogenous_transition <- function(iot,
                                               T = 20,
                                               closure_option = "residual-others",
@@ -804,6 +677,23 @@ simulate_iot_exogenous_transition <- function(iot,
 }
 ```
 
+This walkthrough chunk summarizes `simulate_iot_exogenous_transition()` logic in small steps.
+
+
+This chunk runs `step2_walk_simulate_iot_exogenous_transition`.
+
+```{r step2_walk_simulate_iot_exogenous_transition}
+# Outline for simulate_iot_exogenous_transition()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+
+This chunk runs step2 and produces the step outputs.
+
 ```{r step2_run}
 validate_tutorial_config(core_config)
 iot <- download_or_load_iot(core_config)
@@ -823,6 +713,8 @@ rownames(step2_long) <- NULL
 
 head(step2_long)
 ```
+
+This chunk plots results for step2.
 
 ```{r step2_plot, fig.height=4, fig.width=7}
 p_gdp <- ggplot2::ggplot(step2_long, ggplot2::aes(year, GDP, color = closure)) +
@@ -862,28 +754,74 @@ Integrate SIM behavior (consumption, taxes, wealth, deficit) with IO production,
 
 Now household/government stocks and flows are endogenous. Transition is endogenous here (no closure solver).
 
-```{r step3_functions}
-calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
-  tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
+This chunk defines `load_wealth_init()` for step3.
+
+```{r step3_functions_load_wealth_init, echo: false}
+load_wealth_init <- function(cfg) {
+  params <- list(
+    freq = cfg$freq,
+    unit = cfg$wealth_unit,
+    co_nco = cfg$wealth_co_nco,
+    sector = c("S13", "S14"),
+    finpos = cfg$wealth_finpos,
+    na_item = cfg$wealth_na_item,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+
+  js <- fetch_eurostat_json("nasa_10_f_bs", params, cache_dir = cfg$cache_dir)
+  sector_vals <- extract_values_by_dim(js, "sector")
+
+  if (!("S14" %in% names(sector_vals)) || !("S13" %in% names(sector_vals))) {
+    stop("Wealth dataset missing S14 or S13 for selected configuration.", call. = FALSE)
+  }
+
+  hh_net_worth <- as.numeric(sector_vals[["S14"]])
+  gov_net_worth <- as.numeric(sector_vals[["S13"]])
+
+  if (!is.finite(hh_net_worth) || !is.finite(gov_net_worth)) {
+    stop("Wealth values are unavailable/non-finite for selected configuration.", call. = FALSE)
+  }
 
   list(
-    base_year = iot$base_year,
-    n = iot$n,
-    sector_codes = iot$sector_codes,
-    sector_labels = iot$sector_labels,
-    L = iot$L0,
-    va_coeff = iot$va_coeff,
-    beta_C = iot$beta_C,
-    beta_G = iot$beta_G,
-    I_i0 = iot$I_i0,
-    G0 = iot$G0,
-    tau_y = tau_guess,
-    V0 = wealth_init$V0,
-    B0 = wealth_init$B0,
-    idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
+    V0 = hh_net_worth,
+    B0 = max(-gov_net_worth, 0)
   )
 }
 
+```
+
+This walkthrough chunk summarizes `load_wealth_init()` logic in small steps.
+
+
+This chunk runs `step3_walk_load_wealth_init`.
+
+```{r step3_walk_load_wealth_init}
+# Outline for load_wealth_init()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+This chunk defines `calibrate_sim_iot()` for step3.
+
+```{r step3_functions_calibrate_sim_iot}
+calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
+  tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
+  list(
+    base_year = iot$base_year, n = iot$n, sector_codes = iot$sector_codes, sector_labels = iot$sector_labels,
+    L = iot$L0, va_coeff = iot$va_coeff, beta_C = iot$beta_C, beta_G = iot$beta_G, I_i0 = iot$I_i0,
+    G0 = iot$G0, tau_y = tau_guess, V0 = wealth_init$V0, B0 = wealth_init$B0,
+    idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
+  )
+}
+```
+
+This chunk defines `simulate_sim_iot_endogenous()` for step3.
+
+```{r step3_functions_simulate_sim_iot_endogenous, echo: false}
 simulate_sim_iot_endogenous <- function(calib,
                                         T = 20,
                                         c_y = 0.82,
@@ -962,6 +900,23 @@ simulate_sim_iot_endogenous <- function(calib,
 }
 ```
 
+This walkthrough chunk summarizes `simulate_sim_iot_endogenous()` logic in small steps.
+
+
+This chunk runs `step3_walk_simulate_sim_iot_endogenous`.
+
+```{r step3_walk_simulate_sim_iot_endogenous}
+# Outline for simulate_sim_iot_endogenous()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+
+This chunk runs step3 and produces the step outputs.
+
 ```{r step3_run}
 if (!exists('iot')) {
   validate_tutorial_config(core_config)
@@ -982,6 +937,8 @@ step3_compare <- rbind(
 
 tail(step3_compare)
 ```
+
+This chunk plots results for step3.
 
 ```{r step3_plot, fig.height=4, fig.width=7}
 p3_gdp <- ggplot2::ggplot(step3_compare, ggplot2::aes(year, GDP, color = scenario)) +
@@ -1023,30 +980,23 @@ Add minimal open-economy channels:
 
 Added explicit RoW-lite accounting. IO-SIM core remains the same.
 
-```{r step4_functions}
+This chunk defines `calibrate_sim_iot_row()` for step4.
+
+```{r step4_functions_calibrate_sim_iot_row}
 calibrate_sim_iot_row <- function(iot, wealth_init, tau_y = NULL) {
   tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
-
   list(
-    base_year = iot$base_year,
-    n = iot$n,
-    sector_codes = iot$sector_codes,
-    sector_labels = iot$sector_labels,
-    L = iot$L0,
-    va_coeff = iot$va_coeff,
-    beta_C = iot$beta_C,
-    beta_G = iot$beta_G,
-    I_i0 = iot$I_i0,
-    EX_i0 = iot$EX_i0,
-    m_i = iot$m_i,
-    G0 = iot$G0,
-    tau_y = tau_guess,
-    V0 = wealth_init$V0,
-    B0 = wealth_init$B0,
+    base_year = iot$base_year, n = iot$n, sector_codes = iot$sector_codes, sector_labels = iot$sector_labels,
+    L = iot$L0, va_coeff = iot$va_coeff, beta_C = iot$beta_C, beta_G = iot$beta_G, I_i0 = iot$I_i0, EX_i0 = iot$EX_i0,
+    m_i = iot$m_i, G0 = iot$G0, tau_y = tau_guess, V0 = wealth_init$V0, B0 = wealth_init$B0,
     idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
   )
 }
+```
 
+This chunk defines `simulate_sim_iot_row_lite()` for step4.
+
+```{r step4_functions_simulate_sim_iot_row_lite, echo: false}
 simulate_sim_iot_row_lite <- function(calib,
                                       T = 20,
                                       c_y = 0.82,
@@ -1137,6 +1087,23 @@ simulate_sim_iot_row_lite <- function(calib,
 }
 ```
 
+This walkthrough chunk summarizes `simulate_sim_iot_row_lite()` logic in small steps.
+
+
+This chunk runs `step4_walk_simulate_sim_iot_row_lite`.
+
+```{r step4_walk_simulate_sim_iot_row_lite}
+# Outline for simulate_sim_iot_row_lite()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+
+This chunk runs step4 and produces the step outputs.
+
 ```{r step4_run}
 if (!exists('iot')) {
   validate_tutorial_config(core_config)
@@ -1158,6 +1125,8 @@ step4_compare <- rbind(
 step4_compare$tb_check <- step4_compare$EX - step4_compare$IM - step4_compare$TB
 summary(step4_compare$tb_check)
 ```
+
+This chunk plots results for step4.
 
 ```{r step4_plot, fig.height=4, fig.width=7}
 p4_gdp <- ggplot2::ggplot(step4_compare, ggplot2::aes(year, GDP, color = scenario)) +
@@ -1197,7 +1166,121 @@ Add direct production emissions by sector and compare baseline vs transition pat
 
 Added emissions accounting on top of the RoW-lite IO-SIM model, using a separate emissions calibration set (default: Belgium 2020, industry-by-industry).
 
-```{r step5_functions}
+This chunk normalizes NACE sector codes for emissions matching in step5.
+
+```{r step5_functions_normalize_nace_code}
+normalize_nace_code <- function(x) {
+  y <- toupper(as.character(x))
+  y <- gsub("-", "_", y)
+  y <- gsub("\\.", "", y)
+  y <- gsub("^([A-Z])(\\d{2})_(\\d{2})$", "\\1\\2_\\1\\3", y, perl = TRUE)
+  y
+}
+```
+
+This chunk extracts available AEA sector codes for the selected emissions configuration.
+
+```{r step5_functions_get_aea_codes}
+get_aea_codes <- function(cfg) {
+  params <- list(
+    freq = cfg$freq,
+    airpol = cfg$emissions_airpol,
+    unit = cfg$emissions_unit,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+  js <- fetch_eurostat_json("env_ac_ainah_r2", params, cache_dir = cfg$cache_dir)
+  val_by_code <- extract_values_by_dim(js, "nace_r2")
+  nz_codes <- names(val_by_code)[is.finite(val_by_code) & !is.na(val_by_code)]
+  unique(normalize_nace_code(nz_codes))
+}
+```
+
+This chunk subsets IOT sectors to those with available AEA coverage when strict consistency is enabled.
+
+```{r step5_functions_align_iot_to_aea}
+align_iot_to_aea <- function(iot, cfg) {
+  aea_norm <- get_aea_codes(cfg); sec_norm <- normalize_nace_code(iot$sector_codes)
+  keep <- sec_norm %in% aea_norm
+  if (sum(keep) < 20) stop("Too few sectors overlap between IOT and AEA for selected emissions configuration.", call. = FALSE)
+  idx <- which(keep)
+  iot$sector_codes <- iot$sector_codes[idx]; iot$sector_labels <- iot$sector_labels[idx]; iot$n <- length(idx)
+  iot$Z0 <- iot$Z0[idx, idx, drop = FALSE]; iot$A0 <- iot$A0[idx, idx, drop = FALSE]
+  iot$L0 <- tryCatch(solve(diag(iot$n) - iot$A0), error = function(e) solve(diag(iot$n) - iot$A0 + diag(1e-8, iot$n)))
+  for (nm in c("x0", "C_i0", "G_i0", "I_i0", "EX_i0", "m_i", "va_coeff", "beta_C", "beta_G")) iot[[nm]] <- iot[[nm]][idx]
+  iot$F0 <- iot$C_i0 + iot$G_i0 + iot$I_i0 + iot$EX_i0
+  iot$G0 <- sum(iot$G_i0); iot$Y0 <- sum(iot$va_coeff * iot$x0)
+  if (sum(iot$beta_C) > 0) iot$beta_C <- iot$beta_C / sum(iot$beta_C)
+  if (sum(iot$beta_G) > 0) iot$beta_G <- iot$beta_G / sum(iot$beta_G)
+  iot
+}
+```
+
+This chunk defines `load_aea_emissions()` for step5.
+
+```{r step5_functions_load_aea_emissions, echo: false}
+load_aea_emissions <- function(cfg, sector_codes, x0) {
+  if (!identical(cfg$table_type, "industry_by_industry")) {
+    stop("AEA emissions are not directly available for product_by_product configuration.", call. = FALSE)
+  }
+
+  params <- list(
+    freq = cfg$freq,
+    airpol = cfg$emissions_airpol,
+    unit = cfg$emissions_unit,
+    geo = cfg$country,
+    time = as.character(cfg$year)
+  )
+
+  js <- fetch_eurostat_json("env_ac_ainah_r2", params, cache_dir = cfg$cache_dir)
+  aea_vals <- extract_values_by_dim(js, "nace_r2")
+
+  aea_norm <- normalize_nace_code(names(aea_vals))
+  names(aea_vals) <- aea_norm
+
+  sec_norm <- normalize_nace_code(sector_codes)
+  em_ths_t <- as.numeric(aea_vals[sec_norm])
+  names(em_ths_t) <- sector_codes
+
+  missing <- !is.finite(em_ths_t)
+  if (any(missing)) {
+    stop(
+      "CO2 emissions unavailable for sector code(s): ",
+      paste(sector_codes[missing], collapse = ", "),
+      ". Adjust configuration or disable strict consistency.",
+      call. = FALSE
+    )
+  }
+
+  intensity_kg_per_meur <- safe_div(em_ths_t * 1e6, as.numeric(x0))
+  intensity_kg_per_meur[!is.finite(intensity_kg_per_meur)] <- 0
+
+  data.frame(
+    sector = sector_codes,
+    intensity_kg_per_meur = intensity_kg_per_meur,
+    stringsAsFactors = FALSE
+  )
+}
+
+```
+
+This walkthrough chunk summarizes `load_aea_emissions()` logic in small steps.
+
+
+This chunk runs `step5_walk_load_aea_emissions`.
+
+```{r step5_walk_load_aea_emissions}
+# Outline for load_aea_emissions()
+# 1) Read and validate inputs
+# 2) Build intermediate objects
+# 3) Solve / iterate / transform as needed
+# 4) Return cleaned outputs
+invisible(NULL)
+```
+
+This chunk defines `attach_production_emissions()` for step5.
+
+```{r step5_functions_attach_production_emissions}
 attach_production_emissions <- function(sim_result, intensity_tbl, sector_codes) {
   idx <- match(sector_codes, intensity_tbl$sector)
   s <- intensity_tbl$intensity_kg_per_meur[idx]
@@ -1210,28 +1293,35 @@ attach_production_emissions <- function(sim_result, intensity_tbl, sector_codes)
 }
 ```
 
-```{r step5_run}
+
+This chunk runs step5 and produces the step outputs.
+
+```{r step5_run_setup}
 validate_tutorial_config(emissions_config)
-
 iot_emis <- download_or_load_iot(emissions_config)
+if (isTRUE(emissions_config$enforce_co2_consistency)) {
+  iot_emis <- align_iot_to_aea(iot_emis, emissions_config)
+}
 wealth_emis <- load_wealth_init(emissions_config)
-
 calib4_emis <- calibrate_sim_iot_row(iot_emis, wealth_emis)
 step5_baseline_sim <- simulate_sim_iot_row_lite(calib4_emis, T = 20, transition_speed = 0)
 step5_transition_sim <- simulate_sim_iot_row_lite(calib4_emis, T = 20, transition_speed = 0.003)
-
 aea_intensity <- load_aea_emissions(emissions_config, iot_emis$sector_codes, iot_emis$x0)
+```
 
+This chunk attaches emissions and assembles the Step 5 comparison table.
+
+```{r step5_run_compare}
 step5_base <- attach_production_emissions(step5_baseline_sim, aea_intensity, iot_emis$sector_codes)
 step5_trans <- attach_production_emissions(step5_transition_sim, aea_intensity, iot_emis$sector_codes)
-
 step5_compare <- rbind(
   data.frame(step5_base, scenario = "baseline"),
   data.frame(step5_trans, scenario = "transition")
 )
-
 tail(step5_compare)
 ```
+
+This chunk plots results for step5.
 
 ```{r step5_plot, fig.height=4, fig.width=7}
 ggplot2::ggplot(step5_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
@@ -1248,6 +1338,8 @@ Not implemented here:
 -   In MRIO form: `E_cons,t = e_dom * L_dom * y_dom,t + e_for * L_for * y_imp,t`.
 
 ## Final Snapshot
+
+This chunk assembles the final comparison snapshot table.
 
 ```{r final_snapshot}
 last_year <- max(step5_compare$year)
