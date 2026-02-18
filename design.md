@@ -28,25 +28,28 @@ For R files we have a main function, with  `if (!interactive()) {  main() }`, so
     - SIM-lag: Use behavioural equations that only depend on previous time step values. Plot GDP from initial value higher and lower than steady state, versus time - 20 years with yearly time step, to see if it reaches the steady state value.
     - SIM-current: Have a switch to instead run fixed point iteration to satisfy behavioural consistency with behavioural equations that depend on current time step values (e.g. consumption from current income and from previous wealth), and compare the simulations in the fixed point iteration case with those above in a similar plot.
 
-- Loading IOT and simulate exogenous energy transition
+- Step 2 core: Incorporate IOT as production sector into SIM model and fit baseline
+    - Load IOT and use it as production sector
+    - Fit SIM-side parameters to base-year macro values
+    - Simulate the fitted model for 20 years with transition speed set to zero
+
+- Step 3 core: Apply endogenous transition on top of Step 2 baseline
+    - Activate endogenous brown-to-green demand-share shifts
+    - Compare transition path to Step 2 no-transition baseline
+
+- Step 4 core: Add a minimal Rest of the World (RoW) sector and treat imports and exports consistently
+    - Point out that imports for production are already embedded in Z part of the IOT (total instead of domestic chosen earlier) - these are imports for use by industry
+    - Point out that domestic consumption imports are different, and we should be careful to use domestic technology for them! How would MRIO handle this compared to just using national IOT? Outline using equations, but not in the simulation.
+    - Point out that exports can be largely attributed to domestic technology and included in final demand.
+
+- Step 5 advanced/optional: Loading IOT and simulate exogenous energy transition
     - Allow user to specify the IOT specs at the start: default is Austria 2020 product x product (since industry x industry is not available for 2020), total (not just domestic) flows
     - Load Symmetric IO Table for above selection, use a caching method, if the file is not found locally in current folder, then download it.
     - For starting values of NACE's 2 energy sectors (I think 19 coal, petroleum et al and 35 electricity, gas and heating), set final values after 20 years for an energy transition, compute a growth rate for each sector. Set also a growth rate for the total GDP.
     - In the fixed point loop, compute also the domestic demand and A matrix consistent with the closure.
     - Simulate here too for 20 time steps.
 
-- Incorporate IOT as production sector into SIM model
-    - Load IOT, and use it as production sector
-    - Fit other parameters of the SIM model to match the GDP etc.
-    - Simulate the model for 20 years.
-    - Incorporate an energy transition and simulate endogenously roughly similar to the above but without forcing consistency with the closure
-
-- Add a minimal Rest of the World (RoW) sector and treat imports and exports consistently.
-    - Point out that imports for production are already embedded in Z part of the IOT (total instead of domestic chosen earlier) - these are imports for use by industry
-    - Point out that domestic consumption imports are different, and we should be careful to use domestic technology for them! How would MRIO handle this compared to just using national IOT? Outline using equations, but not in the simulation.
-    - Point out that exports can be largely attributed to domestic technology and included in final demand.
-
-- Download with caching the Eurostat AEA emissions by NACE to compute direct CO2 emissions by industry
+- Step 6 advanced/optional: Download Eurostat AEA emissions by NACE to compute direct CO2 emissions by industry
     - Here we use a different country than Austria, say Germany or Belgium for which industry x industry emissions are available, since CO2 emissions are available industry x industry.
     - For this new set, the fitting of the model parameters as per earlier steps, is of course redone.
     - Use intensities to project these emissions of production for domestic demand for the next 20 years under the status quo and the energy transition
@@ -59,16 +62,19 @@ Each step should have one core play and one optional play, framed as an economic
 - Step 1 (SIM):
   - Core play: compare convergence when initial GDP starts below versus above steady state.
   - Optional play: change consumption out of wealth and discuss effects on convergence speed and stability.
-- Step 2 (IOT + exogenous transition):
-  - Core play: switch closure assumption and compare which sectors absorb adjustment under the same aggregate growth target.
-  - Optional play: strengthen or relax green-versus-brown transition assumptions and compare sector mix and GDP composition.
-- Step 3 (SIM + IOT endogenous transition):
+- Step 2 (SIM + IOT baseline fit, core):
+  - Core play: adjust government growth or tax assumptions and compare the no-transition baseline path.
+  - Optional play: change household propensity to consume from wealth and inspect baseline wealth/GDP dynamics.
+- Step 3 (endogenous transition, core):
   - Core play: change endogenous transition pressure/speed and compare macro path and sector reallocation.
-  - Optional play: vary household propensity to consume from wealth and discuss growth versus wealth-depletion trade-offs.
-- Step 4 (RoW-lite):
+  - Optional play: vary household propensity to consume from wealth under transition and discuss growth versus wealth-depletion trade-offs.
+- Step 4 (RoW-lite, core):
   - Core play: change import leakage and compare GDP and trade-balance dynamics.
   - Optional play: change export growth and compare external-demand-led versus domestic-demand-led growth paths.
-- Step 5 (production emissions):
+- Step 5 (IOT + exogenous transition, advanced/optional):
+  - Core play: switch closure assumption and compare which sectors absorb adjustment under the same aggregate growth target.
+  - Optional play: strengthen or relax green-versus-brown transition assumptions and compare sector mix and GDP composition.
+- Step 6 (production emissions, advanced/optional):
   - Core play: compare baseline and transition CO2 paths and interpret production-based emissions.
   - Optional play: add exogenous intensity decline and separate activity effects from intensity effects.
 
@@ -94,10 +100,11 @@ Question variant generation principle:
 
 4. Step ownership is strict:
    - Step 1 file defines only SIM functions.
-   - Step 2 file defines only IOT/closure functions.
-   - Step 3 file defines only SIM+IOT integration functions.
+   - Step 2 file defines SIM+IOT baseline-fit functions (including shared IO setup used by core flow).
+   - Step 3 file defines endogenous-transition functions using the Step 2 fitted model.
    - Step 4 file defines only RoW-lite functions.
-   - Step 5 file defines only emissions functions.
+   - Step 5 file defines only IOT/closure exogenous-transition functions (advanced section).
+   - Step 6 file defines only emissions functions.
 
 ## Slide and Code Size Constraints
 

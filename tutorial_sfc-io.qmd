@@ -21,13 +21,15 @@ This file is the canonical answer tutorial source. The question variant is gener
 
 Load minimal packages and global options only.
 
+Check that required packages are installed.
+Stop early with a clear error if anything is missing.
+This keeps the tutorial run deterministic and minimal.
 ```{r setup_packages}
 required_packages <- c("jsonlite", "ggplot2")
 missing_packages <- required_packages[!vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_packages) > 0) {
   stop("Missing package(s): ", paste(missing_packages, collapse = ", "), call. = FALSE)
 }
-options(device = function(...) grDevices::pdf(file = file.path(tempdir(), "Rplots.pdf"), ...))
 ```
 
 ## Step 1: SIM Closed Model
@@ -46,15 +48,20 @@ Build SIM-lag first, then add SIM-current, then compare both against the analyti
 - `H_t = H_{t-1} + YD_t - C_t`
 - `Y* = G / theta`
 
+Steady-state derivation (SIM):
+- At steady state, stocks are constant: `H_t = H_{t-1}` so `0 = YD - C`, hence `C = YD = (1-theta)Y`.
+- Goods market: `Y = C + G = (1-theta)Y + G`.
+- Rearranging: `theta * Y = G`, so `Y* = G / theta`.
+- From behavior at steady state: `C = alpha1*(1-theta)Y + alpha2*H` and `C = (1-theta)Y`.
+- Therefore: `H* = ((1-alpha1)*(1-theta)/alpha2) * Y* = ((1-alpha1)*(1-theta)/alpha2) * (G/theta)`.
+- This fixed-point GDP is independent of `alpha1` and `alpha2`; those affect only transition dynamics.
+
 Define fixed point and lag simulation.
 
+Define the SIM-lag dynamics as a simple time loop.
+Consumption depends on lagged disposable income and past wealth.
+The function returns a tidy time-series for plotting and comparisons.
 ```{r step1_functions_sim_core, echo: false}
-sim_steady_state <- function(G, theta, alpha1, alpha2) {
-  Y_star <- G / theta
-  H_star <- ((1 - alpha1) * (1 - theta) / alpha2) * Y_star
-  list(Y_star = Y_star, H_star = H_star)
-}
-
 simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2, Y0 = 80, H0 = 300) {
   out <- data.frame(t = seq_len(T), Y = NA_real_, T_tax = NA_real_, YD = NA_real_, C = NA_real_, H = NA_real_)
   YD_prev <- (1 - theta) * Y0
@@ -75,51 +82,55 @@ simulate_sim_lag <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 
 
 Run SIM-lag from below steady state.
 
+Set baseline SIM parameters and compute the fixed point Y*.
+Choose an initial GDP below Y* and derive a consistent H0.
+Run the lag model to generate the convergence path.
 ```{r step1_run_lag_below}
 T_h <- 20
 G <- 100
 theta <- 0.2
 alpha1 <- 0.6
 alpha2 <- 0.2
-ss <- sim_steady_state(G, theta, alpha1, alpha2)
-Y0_low <- 0.7 * ss$Y_star
-H0_from_Y <- function(Y0, G, theta, alpha1, alpha2) (Y0 * (1 - alpha1 * (1 - theta)) - G) / alpha2
-H0_low <- H0_from_Y(Y0_low, G, theta, alpha1, alpha2)
+Y_star <- G / theta
+Y0_low <- 0.7 * Y_star
+H0_low <- (Y0_low * (1 - alpha1 * (1 - theta)) - G) / alpha2
 lag_low <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
 ```
 
 Plot lag path from below.
 
+Plot the GDP path from the lag model.
+Overlay the analytic fixed point as a horizontal reference.
+This visualizes convergence from below.
 ```{r step1_plot_lag_below, fig.height=4, fig.width=7}
-ggplot2::ggplot(lag_low, ggplot2::aes(t, Y)) +
-  ggplot2::geom_line(linewidth = 1, color = "steelblue") +
-  ggplot2::geom_hline(yintercept = ss$Y_star, linetype = "dashed") +
-  ggplot2::labs(title = "Step 1A: SIM-lag from below fixed point", x = "t", y = "GDP") +
-  ggplot2::theme_minimal()
+plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+     xlab = "t", ylab = "GDP", main = "Step 1A: SIM-lag from below fixed point")
+abline(h = Y_star, lty = 2)
 ```
 
 Core play: start above steady state and compare.
 
+Change the initial GDP to start above the fixed point.
+Compute the consistent H0 and rerun the lag model.
+Plot below/above paths together to compare convergence.
 ```{r step1_play_core_lag_above}
-Y0_high_play <- 1.3 * ss$Y_star  # @exercise[id=step1_high_start;kind=core;question_expr=1.1 * ss$Y_star;prompt="Start GDP above fixed point and compare convergence";hint="Try 1.1, 1.3, then 1.6 times Y*"]
-H0_high_play <- H0_from_Y(Y0_high_play, G, theta, alpha1, alpha2)
+Y0_high_play <- 1.3 * Y_star  # @exercise[id=step1_high_start;kind=core;question_expr=1.1 * Y_star;prompt="Start GDP above fixed point and compare convergence";hint="Try 1.1, 1.3, then 1.6 times Y*"]
+H0_high_play <- (Y0_high_play * (1 - alpha1 * (1 - theta)) - G) / alpha2
 lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
 
-step1_lag_compare <- rbind(
-  data.frame(t = lag_low$t, Y = lag_low$Y, path = "Lag: below start"),
-  data.frame(t = lag_high_play$t, Y = lag_high_play$Y, path = "Lag: above start")
-)
-
-step1_lag_plot <- ggplot2::ggplot(step1_lag_compare, ggplot2::aes(t, Y, color = path)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::geom_hline(yintercept = ss$Y_star, linetype = "dashed") +
-  ggplot2::labs(title = "Step 1B: SIM-lag from below and above", x = "t", y = "GDP") +
-  ggplot2::theme_minimal()
-print(step1_lag_plot)
+plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+     xlab = "t", ylab = "GDP", main = "Step 1B: SIM-lag from below and above")
+lines(lag_high_play$t, lag_high_play$Y, lwd = 2, col = "firebrick")
+abline(h = Y_star, lty = 2)
+legend("right", legend = c("below start", "above start", "Y*"),
+       col = c("steelblue", "firebrick", "black"), lty = c(1, 1, 2), bty = "n")
 ```
 
 Now add SIM-current fixed-point simulation.
 
+Define SIM-current with within-period fixed-point iteration.
+Each period solves Y from current disposable income and wealth.
+This makes income–consumption contemporaneous instead of lagged.
 ```{r step1_functions_sim_current, echo: false}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
                                     Y0 = 80, H0 = 300, fp_tol = 1e-10, fp_max = 200) {
@@ -150,61 +161,70 @@ simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, 
 
 Compare lag and current dynamics.
 
+Run SIM-current from below and above the fixed point.
+Plot lag and current dynamics together for comparison.
+This shows how timing assumptions affect transients.
 ```{r step1_run_compare_lag_current}
 cur_low <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_low, H0 = H0_low)
 cur_high <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
 
-step1_full_compare <- rbind(
-  data.frame(t = lag_low$t, Y = lag_low$Y, path = "Lag: below"),
-  data.frame(t = lag_high_play$t, Y = lag_high_play$Y, path = "Lag: above"),
-  data.frame(t = cur_low$t, Y = cur_low$Y, path = "Current: below"),
-  data.frame(t = cur_high$t, Y = cur_high$Y, path = "Current: above")
-)
-
-ggplot2::ggplot(step1_full_compare, ggplot2::aes(t, Y, color = path)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::geom_hline(yintercept = ss$Y_star, linetype = "dashed") +
-  ggplot2::labs(title = "Step 1C: SIM-lag vs SIM-current", x = "t", y = "GDP") +
-  ggplot2::theme_minimal()
+plot(lag_low$t, lag_low$Y, type = "l", lwd = 2, col = "steelblue",
+     xlab = "t", ylab = "GDP", main = "Step 1C: SIM-lag vs SIM-current")
+lines(lag_high_play$t, lag_high_play$Y, lwd = 2, col = "firebrick")
+lines(cur_low$t, cur_low$Y, lwd = 2, col = "darkgreen")
+lines(cur_high$t, cur_high$Y, lwd = 2, col = "purple4")
+abline(h = Y_star, lty = 2)
+legend("right", legend = c("Lag below", "Lag above", "Current below", "Current above", "Y*"),
+       col = c("steelblue", "firebrick", "darkgreen", "purple4", "black"),
+       lty = c(1, 1, 1, 1, 2), bty = "n")
 ```
 
 Optional play: adjust wealth propensity in both variants.
 
+Vary the propensity to consume out of wealth (alpha2).
+Rerun both lag and current versions with the new alpha2.
+Plot the impact on speed of convergence.
 ```{r step1_play_optional_alpha2}
 alpha2_play <- 0.25  # @exercise[id=step1_alpha2;kind=optional;question_expr=0.1;prompt="Change alpha2 and compare speed of convergence";hint="Lower alpha2 usually slows wealth-driven demand"]
 
 lag_opt <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
 cur_opt <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
 
-step1_opt <- rbind(
-  data.frame(t = lag_opt$t, Y = lag_opt$Y, path = "Lag"),
-  data.frame(t = cur_opt$t, Y = cur_opt$Y, path = "Current")
-)
-
-ggplot2::ggplot(step1_opt, ggplot2::aes(t, Y, color = path)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 1 Optional: effect of alpha2", x = "t", y = "GDP") +
-  ggplot2::theme_minimal()
+plot(lag_opt$t, lag_opt$Y, type = "l", lwd = 2, col = "steelblue",
+     xlab = "t", ylab = "GDP", main = "Step 1 Optional: effect of alpha2")
+lines(cur_opt$t, cur_opt$Y, lwd = 2, col = "darkgreen")
+legend("right", legend = c("Lag", "Current"), col = c("steelblue", "darkgreen"), lty = 1, bty = "n")
 ```
 
 ### Interpretation
 
 Both dynamic versions converge to the same fixed point, but with different transient paths.
 
-## Step 2: IOT Load + Exogenous Transition
+## Step 2: SIM + IOT Baseline Fit
 
 ### Objective
 
-Load SIOT (default AT 2020 product-by-product TOTAL) and run exogenous 20-year energy transition under alternative closure assumptions.
+Integrate SIM stocks-flows with IOT production, fit to base-year data, and simulate a 20-year no-transition baseline.
 
 ### Equations
 
-- `x_t = (I - A_t)^(-1) f_t`
-- Growth closures are resolved by `solve_io_consistency(...)` from `closure_utils.R`
-- Exogenous transition targets enter as `eps_green` and `eps_brown`
+- `x_t = L f_t`
+- `Y_t = sum_i(v_i x_i,t)`
+- `T_t = tau_y * Y_t`
+- `C_t = c_y * YD_t + c_v * V_{t-1}`
+- `V_t = V_{t-1} + YD_t - C_t`
+- `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
 
-Declare Step 2 data configuration.
+### IO Setup for Step 2
 
+Load and calibrate IO objects here so Step 2 (core) is self-contained.
+Step 4 later reuses the same functions for advanced exogenous closure experiments.
+
+Declare shared IO data configuration for Steps 2 and 3 (and later Step 4 advanced).
+
+Configure the IO dataset once for the core integrated model blocks.
+Set country/year/scope/table type here so all later runs are consistent.
+This same config is reused in Step 3 and in optional Step 4 advanced experiments.
 ```{r step2_run_config}
 make_core_config <- function() {
   list(
@@ -224,18 +244,15 @@ make_core_config <- function() {
 core_config <- make_core_config()
 ```
 
-Define Step 2 helper functions (IOT + closure only).
+Define IO download/parsing helpers used by the core integrated model.
 
+This block defines the IO data plumbing used in the integrated model.
+Algorithm: build a deterministic cache key from query parameters, then fetch from cache or Eurostat.
+Algorithm: decode JSON-stat dimension indices into ordered category tables for rows/columns.
+Algorithm: reconstruct dense matrices from sparse JSON-stat value maps.
+These helpers isolate API/parsing complexity from the economics logic used later.
 ```{r step2_functions_iot_helpers, echo: false}
 source("closure_utils.R")
-
-validate_tutorial_config <- function(cfg) {
-  valid_scope <- c("TOTAL", "DOM")
-  valid_table_type <- c("industry_by_industry", "product_by_product")
-  if (!(cfg$scope %in% valid_scope)) stop("Invalid scope: ", cfg$scope, call. = FALSE)
-  if (!(cfg$table_type %in% valid_table_type)) stop("Invalid table_type: ", cfg$table_type, call. = FALSE)
-  invisible(TRUE)
-}
 
 ensure_cache_dir <- function(cache_dir = "data") {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
@@ -268,8 +285,7 @@ fetch_eurostat_json <- function(dataset_id, params, cache_dir = "data") {
   if (file.exists(cache_file)) return(jsonlite::read_json(cache_file, simplifyVector = FALSE))
   base <- "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
   url <- paste0(base, "/", dataset_id, "?", paste(build_query_parts(params), collapse = "&"))
-  ok <- tryCatch({ utils::download.file(url, destfile = cache_file, mode = "wb", quiet = TRUE); TRUE }, error = function(e) FALSE)
-  if (!ok || !file.exists(cache_file)) stop("Eurostat download failed for ", dataset_id, call. = FALSE)
+  utils::download.file(url, destfile = cache_file, mode = "wb", quiet = TRUE)
   jsonlite::read_json(cache_file, simplifyVector = FALSE)
 }
 
@@ -300,11 +316,9 @@ extract_matrix_from_json <- function(js, row_dim, col_dim) {
   sizes <- as.integer(unlist(js[["size"]]))
   row_i <- match(row_dim, ids)
   col_i <- match(col_dim, ids)
-  if (is.na(row_i) || is.na(col_i)) stop("Could not find row/col dimensions.", call. = FALSE)
   row_cat <- ordered_categories(js[["dimension"]][[row_dim]])
   col_cat <- ordered_categories(js[["dimension"]][[col_dim]])
   vals <- unlist(js[["value"]])
-  if (length(vals) == 0) stop("No observations for filters.", call. = FALSE)
   M <- matrix(NA_real_, nrow = nrow(row_cat), ncol = nrow(col_cat))
   flat_idx <- as.integer(names(vals))
   for (j in seq_along(flat_idx)) {
@@ -322,38 +336,27 @@ iot_schema <- function(table_type) {
   }
 }
 
-safe_div <- function(num, den, default = 0) {
-  out <- rep(default, length(num))
-  ok <- is.finite(num) & is.finite(den) & den != 0
-  out[ok] <- num[ok] / den[ok]
-  out
-}
-
-sum_matching_cols <- function(M, col_codes, col_labels, patterns, default = 0) {
-  hit <- logical(length(col_codes))
-  for (p in patterns) hit <- hit | grepl(p, col_codes, ignore.case = TRUE) | grepl(p, col_labels, ignore.case = TRUE)
-  if (!any(hit)) return(rep(default, nrow(M)))
+sum_matching_cols <- function(M, col_codes, col_labels, patterns) {
+  p <- paste(patterns, collapse = '|')
+  hit <- grepl(p, col_codes, ignore.case = TRUE) | grepl(p, col_labels, ignore.case = TRUE)
+  if (!any(hit)) return(rep(0, nrow(M)))
   rowSums(M[, hit, drop = FALSE], na.rm = TRUE)
 }
 
-find_energy_indices <- function(sector_codes, sector_labels) {
-  idx_brown <- match("C19", sector_codes)
-  idx_green <- match("D", sector_codes)
-  if (!is.finite(idx_brown) || is.na(idx_brown)) idx_brown <- which(grepl("petroleum|coke|coal", sector_labels, ignore.case = TRUE))[1]
-  if (!is.finite(idx_green) || is.na(idx_green)) idx_green <- which(grepl("electricity|gas|steam", sector_labels, ignore.case = TRUE))[1]
+find_energy_indices <- function(sector_codes) {
+  idx_brown <- grep("(^|_)C19", sector_codes)[1]
+  idx_green <- grep("(^|_)D35|(^|_)D", sector_codes)[1]
+  if (is.na(idx_brown) || is.na(idx_green)) stop("Energy sectors not found for this IOT configuration.", call. = FALSE)
   list(idx_green = idx_green, idx_brown = idx_brown)
 }
 
 extract_values_by_dim <- function(js, dim_name) {
-  ids <- unlist(js[["id"]])
-  sizes <- as.integer(unlist(js[["size"]]))
+  ids <- unlist(js[['id']])
+  sizes <- as.integer(unlist(js[['size']]))
   dim_i <- match(dim_name, ids)
-  if (is.na(dim_i)) stop("Dimension not found: ", dim_name, call. = FALSE)
-  cat_tbl <- ordered_categories(js[["dimension"]][[dim_name]])
-  vals <- unlist(js[["value"]])
-  out <- rep(NA_real_, nrow(cat_tbl))
-  names(out) <- cat_tbl$code
-  if (length(vals) == 0) return(out)
+  cat_tbl <- ordered_categories(js[['dimension']][[dim_name]])
+  vals <- unlist(js[['value']])
+  out <- setNames(rep(NA_real_, nrow(cat_tbl)), cat_tbl$code)
   flat_idx <- as.integer(names(vals))
   for (j in seq_along(flat_idx)) {
     pos <- decode_jsonstat_index(flat_idx[j], sizes)
@@ -363,11 +366,15 @@ extract_values_by_dim <- function(js, dim_name) {
 }
 ```
 
-Define compact IOT loader and exogenous transition runner.
+Define compact IOT loader (and keep exogenous-transition function for later advanced step).
 
+This block builds the core IO objects and the advanced exogenous-transition solver wrapper.
+Pseudo-code (loader): identify sectors, compute Z/A/L, and extract C/G/I/EX vectors from IO uses.
+Pseudo-code (calibration): compute import leakage m_i, value-added coefficients, and beta demand shares.
+Pseudo-code (exogenous transition): each year call closure solver, update X/F, then store GDP and sector rates.
+This keeps static IO calibration separate from dynamic closure experiments.
 ```{r step2_functions_iot_sim, echo: false}
 download_or_load_iot <- function(cfg) {
-  validate_tutorial_config(cfg)
   schema <- iot_schema(cfg$table_type)
   params <- list(freq = cfg$freq, unit = cfg$iot_unit, stk_flow = cfg$scope, geo = cfg$country, time = as.character(cfg$year))
   js <- fetch_eurostat_json(schema$dataset_id, params, cache_dir = cfg$cache_dir)
@@ -378,16 +385,14 @@ download_or_load_iot <- function(cfg) {
   col_codes <- mat$col_cat$code
   col_labels <- mat$col_cat$label
 
-  tu_col <- match("TU", col_codes)
-  if (is.na(tu_col)) tu_col <- match("TOTAL", col_codes)
-  if (is.na(tu_col)) stop("Could not find TU/TOTAL use column in IOT.", call. = FALSE)
+  tu_col <- match('TU', col_codes)
+  if (is.na(tu_col)) tu_col <- match('TOTAL', col_codes)
 
   x_by_row <- mat$M[, tu_col]
   names(x_by_row) <- row_codes
-  exclude <- c("TOTAL", "TU", "TFU", "TS_BP", "IMP", "B1G", "P1", "P2_ADJ", "P7", "P7_B0", "P7_D0", "P7_U2", "P7_U3")
+  exclude <- c('TOTAL', 'TU', 'TFU', 'TS_BP', 'IMP', 'B1G', 'P1', 'P2_ADJ', 'P7', 'P7_B0', 'P7_D0', 'P7_U2', 'P7_U3')
   sector_codes <- setdiff(intersect(row_codes, col_codes), exclude)
   sector_codes <- intersect(sector_codes, names(x_by_row)[is.finite(x_by_row) & x_by_row > 1e-9])
-  if (length(sector_codes) < 20) stop("Could not identify sector set from IOT.", call. = FALSE)
 
   r_idx <- match(sector_codes, row_codes)
   c_idx <- match(sector_codes, col_codes)
@@ -395,30 +400,31 @@ download_or_load_iot <- function(cfg) {
   x0 <- as.numeric(x_by_row[sector_codes])
   names(x0) <- sector_codes
 
-  x_safe <- x0
-  x_safe[!is.finite(x_safe) | x_safe <= 0] <- 1e-9
-  A0 <- sweep(Z, 2, x_safe, "/")
+  A0 <- sweep(Z, 2, pmax(x0, 1e-9), '/')
   A0[!is.finite(A0)] <- 0
-  L0 <- tryCatch(solve(diag(length(sector_codes)) - A0), error = function(e) solve(diag(length(sector_codes)) - A0 + diag(1e-8, length(sector_codes))))
+  L0 <- solve(diag(length(sector_codes)) - A0 + diag(1e-8, length(sector_codes)))
 
   Msel <- mat$M[r_idx, , drop = FALSE]
-  C_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c("^P3_S14$", "households"))
-  C_i0 <- C_i0 + sum_matching_cols(Msel, col_codes, col_labels, c("^P3_S15$", "NPISH"))
-  G_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c("^P3_S13$", "government"))
-  I_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c("^P51G$", "^P52$", "^P53$", "^P5$", "gross capital"))
-  EX_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c("^P6$", "^P6_", "exports"))
+  C_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c('^P3_S14$', 'households'))
+  C_i0 <- C_i0 + sum_matching_cols(Msel, col_codes, col_labels, c('^P3_S15$', 'NPISH'))
+  G_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c('^P3_S13$', 'government'))
+  I_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c('^P51G$', '^P52$', '^P53$', '^P5$', 'gross capital'))
+  EX_i0 <- sum_matching_cols(Msel, col_codes, col_labels, c('^P6$', '^P6_', 'exports'))
 
-  imp_row <- which(row_codes %in% c("P7", "IMP"))
-  if (length(imp_row) == 0) imp_row <- grep("imports", row_labels, ignore.case = TRUE)
-  imports_i <- if (length(imp_row) > 0) as.numeric(mat$M[imp_row[1], c_idx, drop = TRUE]) else rep(0, length(sector_codes))
+  imp_row <- which(row_codes %in% c('P7', 'IMP'))
+  imports_i <- as.numeric(mat$M[imp_row[1], c_idx, drop = TRUE])
+  imports_i[!is.finite(imports_i)] <- 0
 
-  m_i <- pmin(pmax(safe_div(imports_i, x0), 0), 0.95)
-  va_row <- which(row_codes == "B1G")
-  va_coeff <- if (length(va_row) > 0) safe_div(as.numeric(mat$M[va_row[1], c_idx, drop = TRUE]), x0) else pmax(1 - colSums(A0, na.rm = TRUE), 0)
-  va_coeff[!is.finite(va_coeff) | va_coeff < 0] <- 0
+  m_i <- pmin(pmax(imports_i / pmax(x0, 1e-9), 0), 0.95)
+  va_row <- which(row_codes == 'B1G')
+  va_coeff <- as.numeric(mat$M[va_row[1], c_idx, drop = TRUE]) / pmax(x0, 1e-9)
+  va_coeff[!is.finite(va_coeff)] <- 0
+  va_coeff <- pmax(va_coeff, 0)
 
-  beta_C <- safe_div(C_i0, rep(sum(C_i0), length(C_i0)))
-  beta_G <- safe_div(G_i0, rep(sum(G_i0), length(G_i0)))
+  beta_C <- C_i0 / sum(C_i0)
+  beta_G <- G_i0 / sum(G_i0)
+  beta_C[!is.finite(beta_C)] <- 0
+  beta_G[!is.finite(beta_G)] <- 0
   if (sum(beta_C) > 0) beta_C <- beta_C / sum(beta_C)
   if (sum(beta_G) > 0) beta_G <- beta_G / sum(beta_G)
 
@@ -456,8 +462,7 @@ simulate_iot_exogenous_transition <- function(iot,
                                               eps_green = 0.04,
                                               eps_brown = -0.04,
                                               max_iter = 60) {
-  idx <- find_energy_indices(iot$sector_codes, iot$sector_labels)
-  if (!is.finite(idx$idx_green) || !is.finite(idx$idx_brown)) stop("Could not identify green/brown sectors.", call. = FALSE)
+  idx <- find_energy_indices(iot$sector_codes)
 
   x_prev <- as.numeric(iot$x0)
   F_prev <- as.numeric(iot$F0)
@@ -518,98 +523,17 @@ simulate_iot_exogenous_transition <- function(iot,
 
 Load IOT for requested configuration.
 
-```{r step2_run_load_iot}
-iot <- download_or_load_iot(core_config)
-list(country = iot$country, year = iot$base_year, table_type = iot$table_type, n_sectors = iot$n)
-```
+Load the IO table for the configured country/year.
+Print a quick summary of the dataset used.
+This confirms what will feed into the transition run.
+Define Step 2 helper functions.
 
-Run baseline closure path.
-
-```{r step2_run_baseline}
-step2_baseline <- simulate_iot_exogenous_transition(
-  iot,
-  T = 20,
-  closure_option = "residual-others",
-  g_target = 0.01,
-  eps_green = 0.04,
-  eps_brown = -0.04
-)
-head(step2_baseline)
-```
-
-Core play: switch closure option.
-
-```{r step2_play_core_closure}
-closure_options <- c("residual-others", "fixed-others", "uniform-demand", "eps-only")
-closure_play <- closure_options[2]  # @exercise[id=step2_closure;kind=core;question_expr=closure_options[3];prompt="Switch closure option and inspect GDP and green/brown paths";hint="Compare fixed-others vs uniform-demand"]
-
-step2_closure_play <- simulate_iot_exogenous_transition(
-  iot,
-  T = 20,
-  closure_option = closure_play,
-  g_target = 0.01,
-  eps_green = 0.04,
-  eps_brown = -0.04
-)
-
-step2_closure_compare <- rbind(
-  data.frame(step2_baseline, scenario = "baseline"),
-  data.frame(step2_closure_play, scenario = paste0("play:", closure_play))
-)
-```
-
-Plot closure comparison.
-
-```{r step2_plot_core, fig.height=4, fig.width=7}
-ggplot2::ggplot(step2_closure_compare, ggplot2::aes(year, GDP, color = scenario)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 2 Core Play: closure effect on GDP", y = "GDP") +
-  ggplot2::theme_minimal()
-```
-
-Optional play: strengthen exogenous transition rates.
-
-```{r step2_play_optional_eps}
-eps_green_play <- 0.06  # @exercise[id=step2_eps;kind=optional;question_expr=0.02;prompt="Change exogenous green growth target and compare brown/green ratio";hint="Use eps_brown = -eps_green"]
-eps_brown_play <- -eps_green_play
-
-step2_eps_play <- simulate_iot_exogenous_transition(
-  iot,
-  T = 20,
-  closure_option = "residual-others",
-  g_target = 0.01,
-  eps_green = eps_green_play,
-  eps_brown = eps_brown_play
-)
-
-ggplot2::ggplot(step2_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9))) +
-  ggplot2::geom_line(linewidth = 1, color = "firebrick") +
-  ggplot2::labs(title = "Step 2 Optional: brown/green output ratio", y = "X_brown / X_green") +
-  ggplot2::theme_minimal()
-```
-
-### Interpretation
-
-Closure choice and exogenous energy targets change the sectoral adjustment path even when aggregate growth is fixed.
-
-## Step 3: SIM + IOT Endogenous Transition
-
-### Objective
-
-Integrate SIM stocks-flows with IOT production and let transition emerge endogenously from model dynamics.
-
-### Equations
-
-- `x_t = L f_t`
-- `Y_t = sum_i(v_i x_i,t)`
-- `T_t = tau_y * Y_t`
-- `C_t = c_y * YD_t + c_v * V_{t-1}`
-- `V_t = V_{t-1} + YD_t - C_t`
-- `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
-
-Define Step 3 helper functions.
-
-```{r step3_functions_sim_iot, echo: false}
+This block defines the endogenous SIM+IO engine for the core tutorial path.
+Pseudo-code: load wealth stocks, calibrate fiscal/demand parameters, then initialize macro and sector states.
+Each year: update G, shift brown/green demand shares from endogenous output signals.
+Solve C via reduced-form fixed point, map demand through L to output, then update V and B stocks.
+Store macro and transition indicators for interpretation and scenario comparison.
+```{r step2_functions_sim_iot, echo: false}
 load_wealth_init <- function(cfg) {
   params <- list(
     freq = cfg$freq,
@@ -623,8 +547,6 @@ load_wealth_init <- function(cfg) {
   )
   js <- fetch_eurostat_json("nasa_10_f_bs", params, cache_dir = cfg$cache_dir)
   vals <- extract_values_by_dim(js, "sector")
-  if (!all(c("S13", "S14") %in% names(vals))) stop("Missing S13/S14 wealth entries.", call. = FALSE)
-  if (!is.finite(vals[["S13"]]) || !is.finite(vals[["S14"]])) stop("Non-finite wealth values.", call. = FALSE)
   list(V0 = as.numeric(vals[["S14"]]), B0 = max(-as.numeric(vals[["S13"]]), 0))
 }
 
@@ -644,7 +566,7 @@ calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
     tau_y = tau_guess,
     V0 = wealth_init$V0,
     B0 = wealth_init$B0,
-    idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
+    idx = find_energy_indices(iot$sector_codes)
   )
 }
 
@@ -712,47 +634,69 @@ simulate_sim_iot_endogenous <- function(calib,
 
 Calibrate SIM+IOT from Step 2 data.
 
-```{r step3_run_calibrate}
-if (!exists("core_config")) core_config <- make_core_config()
-if (!exists("iot")) iot <- download_or_load_iot(core_config)
+Load IO and wealth data for the core configuration.
+Construct the SIM+IO calibration object.
+This object feeds all Step 3 simulations.
+```{r step2_run_calibrate}
+core_config <- make_core_config()
+iot <- download_or_load_iot(core_config)
 wealth_init <- load_wealth_init(core_config)
 calib3 <- calibrate_sim_iot(iot, wealth_init)
 ```
 
-Run baseline and endogenous transition.
+Run 20-year baseline simulation (no endogenous transition).
 
-```{r step3_run_baseline}
-step3_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
-step3_transition <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0.003)
-step3_compare <- rbind(
-  data.frame(step3_baseline, scenario = "baseline"),
-  data.frame(step3_transition, scenario = "endogenous_transition")
-)
+Run the fitted SIM+IOT baseline with transition speed fixed at zero.
+This gives the fitted no-transition reference path for Step 3.
+Use it as the comparison benchmark.
+```{r step2_run_baseline}
+step2_baseline <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = 0)
 ```
+
+### Interpretation
+
+Step 2 fits the integrated SIM+IOT structure and produces a 20-year baseline path without activating transition pressure.
+
+## Step 3: Endogenous Transition
+
+### Objective
+
+Start from the fitted Step 2 model and activate endogenous energy reallocation to study dynamic transition effects.
+
+### Equations
+
+- `shift_t = f(X_green,t-1 - X_brown,t-1)`
+- `beta_C,brown,t = beta_C,brown,t-1 - shift_t`
+- `beta_C,green,t = beta_C,green,t-1 + shift_t`
 
 Core play: transition speed.
 
+Increase endogenous transition speed from zero.
+Rerun the model with the new transition speed.
+Compare GDP against the fitted no-transition baseline from Step 2.
 ```{r step3_play_core_transition_speed}
 transition_speed_play <- 0.004  # @exercise[id=step3_speed;kind=core;question_expr=0.001;prompt="Change endogenous transition speed and compare GDP/energy-share paths";hint="Try 0.001 then 0.004"]
 step3_play <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = transition_speed_play)
-
-step3_core <- rbind(
-  data.frame(step3_baseline, scenario = "baseline"),
-  data.frame(step3_play, scenario = paste0("play:", transition_speed_play))
-)
 ```
 
 Plot Step 3 core comparison.
 
+Plot GDP paths for baseline and transition-speed play.
+This isolates the macro effect of endogenous transition.
+Use this as the main Step 3 comparison graphic.
 ```{r step3_plot_core, fig.height=4, fig.width=7}
-ggplot2::ggplot(step3_core, ggplot2::aes(year, GDP, color = scenario)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 3 Core Play: transition speed", y = "GDP") +
-  ggplot2::theme_minimal()
+plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 3 Core Play: transition speed")
+lines(step3_play$year, step3_play$GDP, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline (no transition)", paste0("play: ", transition_speed_play)),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
 ```
 
 Optional play: consumption out of wealth.
 
+Change consumption out of wealth (`c_v`) under endogenous transition.
+Rerun with fixed transition speed and altered `c_v`.
+Inspect wealth dynamics under the transition setting.
 ```{r step3_play_optional_cv}
 c_v_play <- 0.06  # @exercise[id=step3_cv;kind=optional;question_expr=0.01;prompt="Change c_v and inspect wealth and GDP trajectories";hint="High c_v can sustain higher demand but deplete wealth"]
 step3_opt <- simulate_sim_iot_endogenous(calib3, T = 20, c_v = c_v_play, transition_speed = 0.003)
@@ -765,8 +709,7 @@ ggplot2::ggplot(step3_opt, ggplot2::aes(year, V)) +
 
 ### Interpretation
 
-Step 3 turns transition into a macro-behavioral outcome, not a closure-imposed path.
-
+Step 3 turns transition into a macro-behavioral outcome, starting from the fitted Step 2 baseline.
 ## Step 4: RoW-lite
 
 ### Objective
@@ -782,6 +725,11 @@ Add exports, import leakage, and trade balance tracking.
 
 Define RoW-lite simulation helpers.
 
+This block extends the model with a minimal external sector (RoW-lite).
+Pseudo-code: keep exports exogenous, compute imports as leakage from domestic final demand.
+Use net demand (FD_dom - IM) for production, then update GDP/taxes/wealth/debt/trade each period.
+Track TB = EX - IM while preserving the endogenous transition channel from Step 3.
+This gives an interpretable open-economy extension without full MRIO structure.
 ```{r step4_functions_row_lite, echo: false}
 calibrate_sim_iot_row <- function(iot, wealth_init, tau_y = NULL) {
   tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
@@ -801,7 +749,7 @@ calibrate_sim_iot_row <- function(iot, wealth_init, tau_y = NULL) {
     tau_y = tau_guess,
     V0 = wealth_init$V0,
     B0 = wealth_init$B0,
-    idx = find_energy_indices(iot$sector_codes, iot$sector_labels)
+    idx = find_energy_indices(iot$sector_codes)
   )
 }
 
@@ -883,36 +831,45 @@ simulate_sim_iot_row_lite <- function(calib,
 
 Build RoW-lite calibration and baseline path.
 
+Calibrate RoW-lite using the core IO and wealth data.
+Run the baseline path with zero transition speed.
+This provides the trade-balance reference.
 ```{r step4_run_baseline}
-if (!exists("core_config")) core_config <- make_core_config()
-if (!exists("iot")) iot <- download_or_load_iot(core_config)
-if (!exists("wealth_init")) wealth_init <- load_wealth_init(core_config)
+core_config <- make_core_config()
+iot <- download_or_load_iot(core_config)
+wealth_init <- load_wealth_init(core_config)
 calib4 <- calibrate_sim_iot_row(iot, wealth_init)
 step4_baseline <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0)
 ```
 
 Core play: import leakage.
 
+Scale import leakage up or down.
+Rerun the RoW-lite model with the new leakage factor.
+Assess GDP and trade-balance sensitivity.
 ```{r step4_play_core_imports}
 import_leakage_scale_play <- 1.2  # @exercise[id=step4_imports;kind=core;question_expr=0.8;prompt="Change import leakage and inspect GDP/trade balance";hint="Above 1 increases leakage, below 1 reduces leakage"]
 step4_core_play <- simulate_sim_iot_row_lite(calib4, T = 20, import_leakage_scale = import_leakage_scale_play)
-step4_core <- rbind(
-  data.frame(step4_baseline, scenario = "baseline"),
-  data.frame(step4_core_play, scenario = paste0("play:", import_leakage_scale_play))
-)
 ```
 
-Plot Step 4 core comparison.
+Plot Step 3 core comparison.
 
+Plot trade balance for baseline vs import-leakage play.
+This shows how import dependence shifts TB.
+Use this as the main Step 4 diagnostic.
 ```{r step4_plot_core, fig.height=4, fig.width=7}
-ggplot2::ggplot(step4_core, ggplot2::aes(year, TB, color = scenario)) +
-  ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 4 Core Play: trade balance", y = "TB = EX - IM") +
-  ggplot2::theme_minimal()
+plot(step4_baseline$year, step4_baseline$TB, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "TB = EX - IM", main = "Step 4 Core Play: trade balance")
+lines(step4_core_play$year, step4_core_play$TB, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline", paste0("play: ", import_leakage_scale_play)),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
 ```
 
 Optional play: export growth.
 
+Change export growth and rerun RoW-lite.
+Plot GDP to visualize export-led effects.
+Keep all other parameters unchanged.
 ```{r step4_play_optional_exports}
 ex_growth_play <- 0.01  # @exercise[id=step4_exports;kind=optional;question_expr=0.03;prompt="Change export growth and inspect GDP response";hint="Positive export growth raises final demand"]
 step4_opt <- simulate_sim_iot_row_lite(calib4, T = 20, ex_growth = ex_growth_play)
@@ -927,7 +884,100 @@ ggplot2::ggplot(step4_opt, ggplot2::aes(year, GDP)) +
 
 Imports in this step use domestic leakage rates. In MRIO, imported bundles should be mapped to foreign technologies and foreign emission intensities.
 
-## Step 5: AEA Production Emissions
+## Step 5: IOT Load + Exogenous Transition (Advanced/Optional)
+
+### Objective
+
+Use the same loaded IOT structure to run an exogenous 20-year energy transition under alternative closure assumptions.
+
+### Equations
+
+- `x_t = (I - A_t)^(-1) f_t`
+- Closure determines how non-target sectors absorb adjustment
+- Exogenous transition targets enter as `eps_green` and `eps_brown`
+
+```{r step5_run_load_iot}
+iot <- download_or_load_iot(core_config)
+c(country = iot$country, year = iot$base_year, n_sectors = iot$n)
+```
+
+Run baseline closure path.
+
+Run the exogenous transition with the baseline closure.
+Keep aggregate growth fixed and target green/brown changes.
+Store the resulting GDP and sector paths.
+```{r step5_run_baseline}
+step5_baseline <- simulate_iot_exogenous_transition(
+  iot,
+  T = 20,
+  closure_option = "residual-others",
+  g_target = 0.01,
+  eps_green = 0.04,
+  eps_brown = -0.04
+)
+```
+
+Core play: switch closure option.
+
+Switch to a different closure rule for the same targets.
+Rerun the transition with that closure option.
+This isolates how closure choice changes outcomes.
+```{r step5_play_core_closure}
+closure_options <- c("residual-others", "fixed-others", "uniform-demand", "eps-only")
+closure_play <- closure_options[2]  # @exercise[id=step5_closure;kind=core;question_expr=closure_options[3];prompt="Switch closure option and inspect GDP and green/brown paths";hint="Compare fixed-others vs uniform-demand"]
+
+step5_closure_play <- simulate_iot_exogenous_transition(
+  iot,
+  T = 20,
+  closure_option = closure_play,
+  g_target = 0.01,
+  eps_green = 0.04,
+  eps_brown = -0.04
+)
+```
+
+Plot closure comparison.
+
+Plot GDP for baseline vs closure-play runs.
+Use the same axes to see differences in adjustment paths.
+The gap highlights closure sensitivity.
+```{r step5_plot_core, fig.height=4, fig.width=7}
+plot(step5_baseline$year, step5_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 5 Core Play: closure effect on GDP")
+lines(step5_closure_play$year, step5_closure_play$GDP, lwd = 2, col = "firebrick")
+legend("topleft", legend = c("baseline", paste0("play: ", closure_play)),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+```
+
+Optional play: strengthen exogenous transition rates.
+
+Change the exogenous green/brown growth targets.
+Rerun the transition and compute the brown/green ratio.
+Plot the ratio to visualize structural shift speed.
+```{r step5_play_optional_eps}
+eps_green_play <- 0.06  # @exercise[id=step5_eps;kind=optional;question_expr=0.02;prompt="Change exogenous green growth target and compare brown/green ratio";hint="Use eps_brown = -eps_green"]
+eps_brown_play <- -eps_green_play
+
+step5_eps_play <- simulate_iot_exogenous_transition(
+  iot,
+  T = 20,
+  closure_option = "residual-others",
+  g_target = 0.01,
+  eps_green = eps_green_play,
+  eps_brown = eps_brown_play
+)
+
+ggplot2::ggplot(step5_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9))) +
+  ggplot2::geom_line(linewidth = 1, color = "firebrick") +
+  ggplot2::labs(title = "Step 5 Optional: brown/green output ratio", y = "X_brown / X_green") +
+  ggplot2::theme_minimal()
+```
+
+### Interpretation
+
+Closure choice and exogenous energy targets change the sectoral adjustment path even when aggregate growth is fixed.
+
+## Step 6: AEA Production Emissions
 
 ### Objective
 
@@ -940,7 +990,10 @@ Attach direct production CO2 coefficients and compare baseline vs transition emi
 
 Declare emissions configuration (first appearance in tutorial).
 
-```{r step5_run_emissions_config}
+Declare emissions configuration (country, year, table type).
+This config is separate from Steps 1–4.
+It is used only for emissions attachment.
+```{r step6_run_emissions_config}
 make_emissions_config <- function() {
   list(
     country = Sys.getenv("SFC_EMIS_COUNTRY", "BE"),
@@ -964,7 +1017,12 @@ emissions_config <- make_emissions_config()
 
 Define emissions loaders and attachment functions.
 
-```{r step5_functions_emissions, echo: false}
+This block maps sector output paths to direct production CO2 emissions.
+Pseudo-code: normalize sector codes and align IO sectors with available AEA emissions accounts.
+Compute intensity (kg per MEUR) from AEA emissions and base-year output.
+Run model with stored sector output X_t and compute CO2_t as dot(X_t, intensity).
+This yields production-based baseline vs transition emissions trajectories.
+```{r step6_functions_emissions, echo: false}
 normalize_nace_code <- function(x) {
   y <- toupper(as.character(x))
   y <- gsub("-", "_", y)
@@ -984,7 +1042,6 @@ align_iot_to_aea <- function(iot, cfg) {
   aea_norm <- get_aea_codes(cfg)
   sec_norm <- normalize_nace_code(iot$sector_codes)
   keep <- sec_norm %in% aea_norm
-  if (sum(keep) < 20) stop("Too few IOT sectors overlap with AEA.", call. = FALSE)
   idx <- which(keep)
 
   iot$sector_codes <- iot$sector_codes[idx]
@@ -992,7 +1049,7 @@ align_iot_to_aea <- function(iot, cfg) {
   iot$n <- length(idx)
   iot$Z0 <- iot$Z0[idx, idx, drop = FALSE]
   iot$A0 <- iot$A0[idx, idx, drop = FALSE]
-  iot$L0 <- tryCatch(solve(diag(iot$n) - iot$A0), error = function(e) solve(diag(iot$n) - iot$A0 + diag(1e-8, iot$n)))
+  iot$L0 <- solve(diag(iot$n) - iot$A0 + diag(1e-8, iot$n))
 
   for (nm in c("x0", "C_i0", "G_i0", "I_i0", "EX_i0", "m_i", "va_coeff", "beta_C", "beta_G")) iot[[nm]] <- iot[[nm]][idx]
 
@@ -1021,7 +1078,7 @@ load_aea_emissions <- function(cfg, sector_codes, x0) {
   missing <- !is.finite(em_ths_t)
   if (any(missing)) stop("CO2 missing for sectors: ", paste(sector_codes[missing], collapse = ", "), call. = FALSE)
 
-  intensity <- safe_div(em_ths_t * 1e6, as.numeric(x0))
+  intensity <- (em_ths_t * 1e6) / pmax(as.numeric(x0), 1e-9)
   intensity[!is.finite(intensity)] <- 0
   data.frame(sector = sector_codes, intensity_kg_per_meur = intensity, stringsAsFactors = FALSE)
 }
@@ -1114,9 +1171,12 @@ simulate_row_with_x <- function(calib,
 }
 ```
 
-Prepare Step 5 calibration and baseline/transition runs.
+Prepare Step 6 calibration and baseline/transition runs.
 
-```{r step5_run_calibrate}
+Load IO and wealth data for the emissions configuration.
+Optionally align IO sectors to AEA availability.
+Build calibration and load emission intensities.
+```{r step6_run_calibrate}
 iot_emis <- download_or_load_iot(emissions_config)
 if (isTRUE(emissions_config$enforce_co2_consistency)) iot_emis <- align_iot_to_aea(iot_emis, emissions_config)
 wealth_emis <- load_wealth_init(emissions_config)
@@ -1126,43 +1186,52 @@ aea_intensity <- load_aea_emissions(emissions_config, iot_emis$sector_codes, iot
 
 Core play: compare baseline and transition CO2.
 
-```{r step5_play_core_transition}
-transition_speed_emis_play <- 0.003  # @exercise[id=step5_transition;kind=core;question_expr=0.0;prompt="Compare baseline and transition CO2 paths";hint="Use 0 for baseline and positive speed for transition"]
+Run baseline and transition simulations with stored sector output.
+Attach production CO2 intensities to each path.
+Combine scenarios into a single comparison table.
+```{r step6_play_core_transition}
+transition_speed_emis_play <- 0.003  # @exercise[id=step6_transition;kind=core;question_expr=0.0;prompt="Compare baseline and transition CO2 paths";hint="Use 0 for baseline and positive speed for transition"]
 
-step5_baseline_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = 0)
-step5_transition_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = transition_speed_emis_play)
+step6_baseline_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = 0)
+step6_transition_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = transition_speed_emis_play)
 
-step5_base <- attach_production_emissions(step5_baseline_sim, aea_intensity, iot_emis$sector_codes)
-step5_trans <- attach_production_emissions(step5_transition_sim, aea_intensity, iot_emis$sector_codes)
+step6_base <- attach_production_emissions(step6_baseline_sim, aea_intensity, iot_emis$sector_codes)
+step6_trans <- attach_production_emissions(step6_transition_sim, aea_intensity, iot_emis$sector_codes)
 
-step5_compare <- rbind(
-  data.frame(step5_base, scenario = "baseline"),
-  data.frame(step5_trans, scenario = paste0("transition:", transition_speed_emis_play))
+step6_compare <- rbind(
+  data.frame(step6_base, scenario = "baseline"),
+  data.frame(step6_trans, scenario = paste0("transition:", transition_speed_emis_play))
 )
 ```
 
-Plot Step 5 core comparison.
+Plot Step 6 core comparison.
 
-```{r step5_plot_core, fig.height=4, fig.width=7}
-ggplot2::ggplot(step5_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
+Plot production CO2 for baseline vs transition.
+Use the same axes to highlight differences.
+This is the main emissions comparison plot.
+```{r step6_plot_core, fig.height=4, fig.width=7}
+ggplot2::ggplot(step6_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
   ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 5 Core Play: direct production CO2", y = "Mt CO2") +
+  ggplot2::labs(title = "Step 6 Core Play: direct production CO2", y = "Mt CO2") +
   ggplot2::theme_minimal()
 ```
 
 Optional play: sensitivity to intensity decline.
 
-```{r step5_play_optional_intensity_decline}
-intensity_decline_play <- 0.01  # @exercise[id=step5_intensity;kind=optional;question_expr=0.0;prompt="Apply annual intensity decline and compare CO2 path";hint="This is exogenous decarbonization of direct intensity"]
+Apply an exogenous decline to emission intensities.
+Recompute CO2 with the adjusted intensities.
+Plot the decarbonized path for sensitivity.
+```{r step6_play_optional_intensity_decline}
+intensity_decline_play <- 0.01  # @exercise[id=step6_intensity;kind=optional;question_expr=0.0;prompt="Apply annual intensity decline and compare CO2 path";hint="This is exogenous decarbonization of direct intensity"]
 
 aea_intensity_play <- aea_intensity
 aea_intensity_play$intensity_kg_per_meur <- aea_intensity_play$intensity_kg_per_meur * (1 - intensity_decline_play)
 
-step5_play <- attach_production_emissions(step5_transition_sim, aea_intensity_play, iot_emis$sector_codes)
+step6_play <- attach_production_emissions(step6_transition_sim, aea_intensity_play, iot_emis$sector_codes)
 
-ggplot2::ggplot(step5_play, ggplot2::aes(year, CO2_Mt)) +
+ggplot2::ggplot(step6_play, ggplot2::aes(year, CO2_Mt)) +
   ggplot2::geom_line(linewidth = 1, color = "darkred") +
-  ggplot2::labs(title = "Step 5 Optional: with intensity decline", y = "Mt CO2") +
+  ggplot2::labs(title = "Step 6 Optional: with intensity decline", y = "Mt CO2") +
   ggplot2::theme_minimal()
 ```
 
@@ -1172,11 +1241,14 @@ A consumption footprint would require domestic and imported embodied intensities
 
 ## Final Snapshot
 
-Report final-year key aggregates from Step 5.
+Report final-year key aggregates from Step 6.
 
+Extract the final year from the emissions comparison.
+Select the key aggregate variables for reporting.
+This produces the compact end-of-tutorial table.
 ```{r final_snapshot}
-last_year <- max(step5_compare$year)
-summary_final <- step5_compare[step5_compare$year == last_year, c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
+last_year <- max(step6_compare$year)
+summary_final <- step6_compare[step6_compare$year == last_year, c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
 summary_final <- summary_final[order(summary_final$scenario), ]
 rownames(summary_final) <- NULL
 summary_final

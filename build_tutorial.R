@@ -140,7 +140,7 @@ must_succeed <- function(cmd, cmd_args, env = character()) {
 }
 
 extract_r_chunks <- function(lines) {
-  step_ids <- sprintf("step%02d", 1:5)
+  step_ids <- sprintf("step%02d", 1:6)
   chunks <- list()
 
   current_step <- "shared"
@@ -275,7 +275,7 @@ generate_r_variant <- function(src_qmd, prefix) {
   shared_chunks <- Filter(function(ch) identical(ch$step, "shared"), chunks)
   write_setup_script(shared_chunks, setup_file, src_qmd)
 
-  step_ids <- sprintf("step%02d", 1:5)
+  step_ids <- sprintf("step%02d", 1:6)
   step_files <- file.path(output_r_dir, paste0(prefix, "_", step_ids, ".R"))
 
   for (i in seq_along(step_ids)) {
