@@ -21,8 +21,8 @@ show_help <- function() {
     "Usage: Rscript build_tutorial.R [flags]\n\n",
     "Flags:\n",
     "  --generate-question-steps   Generate question QMD for each step\n",
-    "  --generate-r-steps-answer   Generate per-step answer R files\n",
-    "  --generate-r-steps-question Generate per-step question R files\n",
+    "  --generate-r-steps-answer   Generate per-step answer R files (optional)\n",
+    "  --generate-r-steps-question Generate per-step question R files (default R output)\n",
     "  --check-step-sync           Regenerate questions and fail if git diff exists\n",
     "  --render-html               Render docs index + answer/question step pages\n",
     "  --help                      Show this help\n",
@@ -44,9 +44,8 @@ flags <- list(
 )
 
 if (!any(unlist(flags))) {
-  message("No flags supplied; defaulting to --generate-question-steps --generate-r-steps-answer --generate-r-steps-question")
+  message("No flags supplied; defaulting to --generate-question-steps --generate-r-steps-question")
   flags$generate_question_steps <- TRUE
-  flags$generate_r_steps_answer <- TRUE
   flags$generate_r_steps_question <- TRUE
 }
 

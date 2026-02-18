@@ -24,22 +24,20 @@ Generated teaching variant committed in repo: `tutorial_sfc-io-question.qmd`.
 1. Open this repo in RStudio.
 2. Install required packages once if needed:
    `install.packages(c("jsonlite", "ggplot2", "knitr", "quarto"))`
-3. Generate derived files:
-   `Rscript build_tutorial.R --generate-question-qmd --generate-r-answer --generate-r-question`
-4. Choose workflow:
-   - Run `.qmd` directly in RStudio (you can run cells interactively and/or click **Render**).
-   - Run generated `.R` scripts directly, e.g.:
-     - `R/tutorial_sfc-io-answer.R`
-     - `R/tutorial_sfc-io-question.R`
-     - `R/tutorial_sfc-io-answer_step01.R` … `R/tutorial_sfc-io-answer_step05.R`
-     - `R/tutorial_sfc-io-question_step01.R` … `R/tutorial_sfc-io-question_step05.R`
+3. Generate derived participant files (default):
+   `Rscript build_tutorial.R --generate-question-steps --generate-r-steps-question`
+4. Optional instructor export (not default):
+   `Rscript build_tutorial.R --generate-r-steps-answer`
+5. Choose workflow:
+   - Run step `.qmd` files directly in RStudio (you can run chunks interactively and/or click **Render**).
+   - Run generated participant `.R` step scripts directly, e.g. `R/step01_question.R` … `R/step06_question.R`
 
 ## Build/Sync commands
 
-- Generate question QMD only:
-  `Rscript build_tutorial.R --generate-question-qmd`
+- Generate question step QMDs:
+  `Rscript build_tutorial.R --generate-question-steps`
 - Check question sync against canonical:
-  `Rscript build_tutorial.R --check-question-sync`
+  `Rscript build_tutorial.R --check-step-sync`
 - Render notebook HTML:
   `Rscript build_tutorial.R --render-html`
 - Render revealjs slides:

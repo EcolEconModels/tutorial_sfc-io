@@ -101,7 +101,7 @@ Question variant generation principle:
 
 2. Each step file contains what it needs and should import / source the previous step files' functions as needed, with main() function specifying what is run in that step and not used in following steps. 
 
-3. Each generated step file in `R/` (answer and question variants) must include:
+3. Each generated step file in `R/` (question variant by default; answer variant optional/manual) must include:
    - `main()`
    - `if (!interactive()) main()`
    - `source()` for required previous step files and/or shared utils.
@@ -169,7 +169,7 @@ The tutorial must run reliably through three paths:
 2. Binder launches RStudio and can run/render tutorial without manual environment repair.
 3. GitHub Pages always serves latest rendered tutorial.
 4. All three paths are documented in README with troubleshooting notes.
-5. Question and answer variants are synchronized in CI.
+5. Question variants are synchronized in CI.
 
 ## Latest Locked Refactor Decisions (Additive)
 
@@ -221,7 +221,8 @@ The following decisions are additive and do not remove prior scope/content decis
 
 9. Build and generation are step-based:
    - `Rscript build_tutorial.R --generate-question-steps`
-   - `Rscript build_tutorial.R --generate-r-steps-answer --generate-r-steps-question`
+   - `Rscript build_tutorial.R --generate-r-steps-question` (default generated R output)
+   - `Rscript build_tutorial.R --generate-r-steps-answer` (optional instructor export)
    - `Rscript build_tutorial.R --check-step-sync`
    - `Rscript build_tutorial.R --render-html`
 
@@ -241,7 +242,7 @@ The structure is finalized for navigability and minimal clutter:
 
 2. Generated/not-tracked outputs:
    - Site/render outputs: `docs/`, `steps/*.html`, `steps/*.knit.md`, `steps/docs/`
-   - Per-step generated scripts: `R/step*_answer.R`, `R/step*_question.R`, `R/tutorial_sfc-io*.R`
+   - Per-step generated scripts: default `R/step*_question.R`; optional `R/step*_answer.R`
    - Legacy generated folders/files: `r_steps/`, root rendered html artifacts, `figure/`, `Rplots.pdf`
 
 3. Single cache location:
