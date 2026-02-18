@@ -261,7 +261,6 @@ Algorithm: decode JSON-stat dimension indices into ordered category tables for r
 Algorithm: reconstruct dense matrices from sparse JSON-stat value maps.
 These helpers isolate API/parsing complexity from the economics logic used later.
 ```{r step2_functions_iot_helpers, echo: false}
-source("closure_utils.R")
 
 ensure_cache_dir <- function(cache_dir = "data") {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
@@ -470,7 +469,7 @@ simulate_iot_exogenous_transition <- function(iot,
                                               g_target = 0.01,
                                               eps_green = 0.04,
                                               eps_brown = -0.04,
-                                              max_iter = 60) {
+                                              max_iter = 20) {
   idx <- find_energy_indices(iot$sector_codes)
 
   x_prev <- as.numeric(iot$x0)
@@ -954,6 +953,11 @@ Use the same loaded IOT structure to run an exogenous 20-year energy transition 
 - Exogenous transition targets enter as `eps_green` and `eps_brown`
 
 ```{r step5_run_load_iot}
+source("closure_utils.R")
+
+step5_T <- if (interactive()) 12 else 20
+step5_max_iter <- if (interactive()) 12 else 20
+
 if (!exists("core_iot", inherits = FALSE)) {
   core_config <- make_core_config()
   core_iot <- download_or_load_iot(core_config)
@@ -970,11 +974,12 @@ Store the resulting GDP and sector paths.
 ```{r step5_run_baseline}
 step5_baseline <- simulate_iot_exogenous_transition(
   iot,
-  T = 20,
+  T = step5_T,
   closure_option = "residual-others",
   g_target = 0.01,
   eps_green = 0.04,
-  eps_brown = -0.04
+  eps_brown = -0.04,
+  max_iter = step5_max_iter
 )
 ```
 
@@ -989,11 +994,12 @@ closure_play <- closure_options[3]  # TODO [core:step5_closure] Switch closure o
 
 step5_closure_play <- simulate_iot_exogenous_transition(
   iot,
-  T = 20,
+  T = step5_T,
   closure_option = closure_play,
   g_target = 0.01,
   eps_green = 0.04,
-  eps_brown = -0.04
+  eps_brown = -0.04,
+  max_iter = step5_max_iter
 )
 ```
 
@@ -1021,11 +1027,12 @@ eps_brown_play <- -eps_green_play
 
 step5_eps_play <- simulate_iot_exogenous_transition(
   iot,
-  T = 20,
+  T = step5_T,
   closure_option = "residual-others",
   g_target = 0.01,
   eps_green = eps_green_play,
-  eps_brown = eps_brown_play
+  eps_brown = eps_brown_play,
+  max_iter = step5_max_iter
 )
 
 ggplot2::ggplot(step5_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9))) +

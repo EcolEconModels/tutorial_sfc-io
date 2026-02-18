@@ -27,8 +27,12 @@ jobs:
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: Install R dependencies
+      - name: Install R dependencies (Binder/shared)
         run: Rscript .binder/install.R
+
+      - name: Install R render dependencies (CI only)
+        run: |
+          Rscript -e "pkgs <- c('knitr','rmarkdown'); missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing) > 0) install.packages(missing, Ncpus = max(1L, parallel::detectCores() - 1L))"
 
       - name: Render HTML
         run: quarto render tutorial_sfc-io.qmd --to html --output index.html --output-dir _site

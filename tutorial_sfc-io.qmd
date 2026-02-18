@@ -261,7 +261,6 @@ Algorithm: decode JSON-stat dimension indices into ordered category tables for r
 Algorithm: reconstruct dense matrices from sparse JSON-stat value maps.
 These helpers isolate API/parsing complexity from the economics logic used later.
 ```{r step2_functions_iot_helpers, echo: false}
-source("closure_utils.R")
 
 ensure_cache_dir <- function(cache_dir = "data") {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
@@ -277,6 +276,12 @@ cache_file_for_query <- function(dataset_id, params, cache_dir) {
     for (v in vv) key_parts <- c(key_parts, paste0(nm, "-", as.character(v)))
   }
   file.path(cache_dir, paste0(dataset_id, "__", sanitize_for_filename(paste(key_parts, collapse = "__")), ".json"))
+}
+
+query_cache_paths <- function(dataset_id, params, cache_dir) {
+  json_file <- cache_file_for_query(dataset_id, params, cache_dir)
+  rds_file <- sub("\\.json$", ".rds", json_file)
+  list(json = json_file, rds = rds_file)
 }
 
 build_query_parts <- function(params) {
@@ -386,6 +391,8 @@ This keeps static IO calibration separate from dynamic closure experiments.
 download_or_load_iot <- function(cfg) {
   schema <- iot_schema(cfg$table_type)
   params <- list(freq = cfg$freq, unit = cfg$iot_unit, stk_flow = cfg$scope, geo = cfg$country, time = as.character(cfg$year))
+  cache_paths <- query_cache_paths(paste0(schema$dataset_id, "_iot"), params, cfg$cache_dir)
+  if (file.exists(cache_paths$rds)) return(readRDS(cache_paths$rds))
   js <- fetch_eurostat_json(schema$dataset_id, params, cache_dir = cfg$cache_dir)
   mat <- extract_matrix_from_json(js, schema$row_dim, schema$col_dim)
 
@@ -437,7 +444,7 @@ download_or_load_iot <- function(cfg) {
   if (sum(beta_C) > 0) beta_C <- beta_C / sum(beta_C)
   if (sum(beta_G) > 0) beta_G <- beta_G / sum(beta_G)
 
-  list(
+  out <- list(
     base_year = as.integer(cfg$year),
     country = cfg$country,
     scope = cfg$scope,
@@ -462,6 +469,8 @@ download_or_load_iot <- function(cfg) {
     beta_C = beta_C,
     beta_G = beta_G
   )
+  saveRDS(out, cache_paths$rds)
+  out
 }
 
 simulate_iot_exogenous_transition <- function(iot,
@@ -470,7 +479,7 @@ simulate_iot_exogenous_transition <- function(iot,
                                               g_target = 0.01,
                                               eps_green = 0.04,
                                               eps_brown = -0.04,
-                                              max_iter = 60) {
+                                              max_iter = 20) {
   idx <- find_energy_indices(iot$sector_codes)
 
   x_prev <- as.numeric(iot$x0)
@@ -554,9 +563,13 @@ load_wealth_init <- function(cfg) {
     geo = cfg$country,
     time = as.character(cfg$year)
   )
+  cache_paths <- query_cache_paths("nasa_10_f_bs_wealth", params, cfg$cache_dir)
+  if (file.exists(cache_paths$rds)) return(readRDS(cache_paths$rds))
   js <- fetch_eurostat_json("nasa_10_f_bs", params, cache_dir = cfg$cache_dir)
   vals <- extract_values_by_dim(js, "sector")
-  list(V0 = as.numeric(vals[["S14"]]), B0 = max(-as.numeric(vals[["S13"]]), 0))
+  out <- list(V0 = as.numeric(vals[["S14"]]), B0 = max(-as.numeric(vals[["S13"]]), 0))
+  saveRDS(out, cache_paths$rds)
+  out
 }
 
 calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
@@ -649,8 +662,12 @@ Construct the SIM+IOT calibration once and keep core data in memory.
 Reuse these objects in Steps 3, 4, and 5 to avoid repeated downloads/parsing.
 ```{r step2_run_calibrate}
 core_config <- make_core_config()
-core_iot <- download_or_load_iot(core_config)
-core_wealth <- load_wealth_init(core_config)
+if (!exists("core_iot", inherits = FALSE) || !identical(core_iot$country, core_config$country) || !identical(core_iot$scope, core_config$scope) || !identical(core_iot$table_type, core_config$table_type) || !identical(as.integer(core_iot$base_year), as.integer(core_config$year))) {
+  core_iot <- download_or_load_iot(core_config)
+}
+if (!exists("core_wealth", inherits = FALSE) || !is.list(core_wealth) || !all(c("V0", "B0") %in% names(core_wealth))) {
+  core_wealth <- load_wealth_init(core_config)
+}
 calib3 <- calibrate_sim_iot(core_iot, core_wealth)
 ```
 
@@ -954,6 +971,11 @@ Use the same loaded IOT structure to run an exogenous 20-year energy transition 
 - Exogenous transition targets enter as `eps_green` and `eps_brown`
 
 ```{r step5_run_load_iot}
+source("closure_utils.R")
+
+step5_T <- if (interactive()) 12 else 20
+step5_max_iter <- if (interactive()) 12 else 20
+
 if (!exists("core_iot", inherits = FALSE)) {
   core_config <- make_core_config()
   core_iot <- download_or_load_iot(core_config)
@@ -970,11 +992,12 @@ Store the resulting GDP and sector paths.
 ```{r step5_run_baseline}
 step5_baseline <- simulate_iot_exogenous_transition(
   iot,
-  T = 20,
+  T = step5_T,
   closure_option = "residual-others",
   g_target = 0.01,
   eps_green = 0.04,
-  eps_brown = -0.04
+  eps_brown = -0.04,
+  max_iter = step5_max_iter
 )
 ```
 
@@ -989,11 +1012,12 @@ closure_play <- closure_options[2]  # @exercise[id=step5_closure;kind=core;quest
 
 step5_closure_play <- simulate_iot_exogenous_transition(
   iot,
-  T = 20,
+  T = step5_T,
   closure_option = closure_play,
   g_target = 0.01,
   eps_green = 0.04,
-  eps_brown = -0.04
+  eps_brown = -0.04,
+  max_iter = step5_max_iter
 )
 ```
 
@@ -1021,11 +1045,12 @@ eps_brown_play <- -eps_green_play
 
 step5_eps_play <- simulate_iot_exogenous_transition(
   iot,
-  T = 20,
+  T = step5_T,
   closure_option = "residual-others",
   g_target = 0.01,
   eps_green = eps_green_play,
-  eps_brown = eps_brown_play
+  eps_brown = eps_brown_play,
+  max_iter = step5_max_iter
 )
 
 ggplot2::ggplot(step5_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9))) +
