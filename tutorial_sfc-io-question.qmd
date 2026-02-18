@@ -101,7 +101,7 @@ ggplot2::ggplot(lag_low, ggplot2::aes(t, Y)) +
 Core play: start above steady state and compare.
 
 ```{r step1_play_core_lag_above}
-Y0_high_play <- 1.3 * ss$Y_star  # @exercise[id=step1_high_start;kind=core;question_expr=1.1 * ss$Y_star;prompt="Start GDP above fixed point and compare convergence";hint="Try 1.1, 1.3, then 1.6 times Y*"]
+Y0_high_play <- 1.1 * ss$Y_star  # TODO [core:step1_high_start] Start GDP above fixed point and compare convergence Hint: Try 1.1, 1.3, then 1.6 times Y*
 H0_high_play <- H0_from_Y(Y0_high_play, G, theta, alpha1, alpha2)
 lag_high_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_high_play, H0 = H0_high_play)
 
@@ -171,7 +171,7 @@ ggplot2::ggplot(step1_full_compare, ggplot2::aes(t, Y, color = path)) +
 Optional play: adjust wealth propensity in both variants.
 
 ```{r step1_play_optional_alpha2}
-alpha2_play <- 0.25  # @exercise[id=step1_alpha2;kind=optional;question_expr=0.1;prompt="Change alpha2 and compare speed of convergence";hint="Lower alpha2 usually slows wealth-driven demand"]
+alpha2_play <- 0.1  # TODO [optional:step1_alpha2] Change alpha2 and compare speed of convergence Hint: Lower alpha2 usually slows wealth-driven demand
 
 lag_opt <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
 cur_opt <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2_play, Y0 = Y0_low, H0 = H0_low)
@@ -541,7 +541,7 @@ Core play: switch closure option.
 
 ```{r step2_play_core_closure}
 closure_options <- c("residual-others", "fixed-others", "uniform-demand", "eps-only")
-closure_play <- closure_options[2]  # @exercise[id=step2_closure;kind=core;question_expr=closure_options[3];prompt="Switch closure option and inspect GDP and green/brown paths";hint="Compare fixed-others vs uniform-demand"]
+closure_play <- closure_options[3]  # TODO [core:step2_closure] Switch closure option and inspect GDP and green/brown paths Hint: Compare fixed-others vs uniform-demand
 
 step2_closure_play <- simulate_iot_exogenous_transition(
   iot,
@@ -570,7 +570,7 @@ ggplot2::ggplot(step2_closure_compare, ggplot2::aes(year, GDP, color = scenario)
 Optional play: strengthen exogenous transition rates.
 
 ```{r step2_play_optional_eps}
-eps_green_play <- 0.06  # @exercise[id=step2_eps;kind=optional;question_expr=0.02;prompt="Change exogenous green growth target and compare brown/green ratio";hint="Use eps_brown = -eps_green"]
+eps_green_play <- 0.02  # TODO [optional:step2_eps] Change exogenous green growth target and compare brown/green ratio Hint: Use eps_brown = -eps_green
 eps_brown_play <- -eps_green_play
 
 step2_eps_play <- simulate_iot_exogenous_transition(
@@ -733,7 +733,7 @@ step3_compare <- rbind(
 Core play: transition speed.
 
 ```{r step3_play_core_transition_speed}
-transition_speed_play <- 0.004  # @exercise[id=step3_speed;kind=core;question_expr=0.001;prompt="Change endogenous transition speed and compare GDP/energy-share paths";hint="Try 0.001 then 0.004"]
+transition_speed_play <- 0.001  # TODO [core:step3_speed] Change endogenous transition speed and compare GDP/energy-share paths Hint: Try 0.001 then 0.004
 step3_play <- simulate_sim_iot_endogenous(calib3, T = 20, transition_speed = transition_speed_play)
 
 step3_core <- rbind(
@@ -754,7 +754,7 @@ ggplot2::ggplot(step3_core, ggplot2::aes(year, GDP, color = scenario)) +
 Optional play: consumption out of wealth.
 
 ```{r step3_play_optional_cv}
-c_v_play <- 0.06  # @exercise[id=step3_cv;kind=optional;question_expr=0.01;prompt="Change c_v and inspect wealth and GDP trajectories";hint="High c_v can sustain higher demand but deplete wealth"]
+c_v_play <- 0.01  # TODO [optional:step3_cv] Change c_v and inspect wealth and GDP trajectories Hint: High c_v can sustain higher demand but deplete wealth
 step3_opt <- simulate_sim_iot_endogenous(calib3, T = 20, c_v = c_v_play, transition_speed = 0.003)
 
 ggplot2::ggplot(step3_opt, ggplot2::aes(year, V)) +
@@ -894,7 +894,7 @@ step4_baseline <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0
 Core play: import leakage.
 
 ```{r step4_play_core_imports}
-import_leakage_scale_play <- 1.2  # @exercise[id=step4_imports;kind=core;question_expr=0.8;prompt="Change import leakage and inspect GDP/trade balance";hint="Above 1 increases leakage, below 1 reduces leakage"]
+import_leakage_scale_play <- 0.8  # TODO [core:step4_imports] Change import leakage and inspect GDP/trade balance Hint: Above 1 increases leakage, below 1 reduces leakage
 step4_core_play <- simulate_sim_iot_row_lite(calib4, T = 20, import_leakage_scale = import_leakage_scale_play)
 step4_core <- rbind(
   data.frame(step4_baseline, scenario = "baseline"),
@@ -914,7 +914,7 @@ ggplot2::ggplot(step4_core, ggplot2::aes(year, TB, color = scenario)) +
 Optional play: export growth.
 
 ```{r step4_play_optional_exports}
-ex_growth_play <- 0.01  # @exercise[id=step4_exports;kind=optional;question_expr=0.03;prompt="Change export growth and inspect GDP response";hint="Positive export growth raises final demand"]
+ex_growth_play <- 0.03  # TODO [optional:step4_exports] Change export growth and inspect GDP response Hint: Positive export growth raises final demand
 step4_opt <- simulate_sim_iot_row_lite(calib4, T = 20, ex_growth = ex_growth_play)
 
 ggplot2::ggplot(step4_opt, ggplot2::aes(year, GDP)) +
@@ -1127,7 +1127,7 @@ aea_intensity <- load_aea_emissions(emissions_config, iot_emis$sector_codes, iot
 Core play: compare baseline and transition CO2.
 
 ```{r step5_play_core_transition}
-transition_speed_emis_play <- 0.003  # @exercise[id=step5_transition;kind=core;question_expr=0.0;prompt="Compare baseline and transition CO2 paths";hint="Use 0 for baseline and positive speed for transition"]
+transition_speed_emis_play <- 0.0  # TODO [core:step5_transition] Compare baseline and transition CO2 paths Hint: Use 0 for baseline and positive speed for transition
 
 step5_baseline_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = 0)
 step5_transition_sim <- simulate_row_with_x(calib5, T = 20, transition_speed = transition_speed_emis_play)
@@ -1153,7 +1153,7 @@ ggplot2::ggplot(step5_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
 Optional play: sensitivity to intensity decline.
 
 ```{r step5_play_optional_intensity_decline}
-intensity_decline_play <- 0.01  # @exercise[id=step5_intensity;kind=optional;question_expr=0.0;prompt="Apply annual intensity decline and compare CO2 path";hint="This is exogenous decarbonization of direct intensity"]
+intensity_decline_play <- 0.0  # TODO [optional:step5_intensity] Apply annual intensity decline and compare CO2 path Hint: This is exogenous decarbonization of direct intensity
 
 aea_intensity_play <- aea_intensity
 aea_intensity_play$intensity_kg_per_meur <- aea_intensity_play$intensity_kg_per_meur * (1 - intensity_decline_play)

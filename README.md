@@ -1,6 +1,8 @@
 # tutorial_sfc-io
 
-Minimal SFC-IO tutorial in Quarto (`tutorial_sfc-io.qmd`).
+Canonical tutorial source: `tutorial_sfc-io.qmd` (answer version).
+
+Generated teaching variant committed in repo: `tutorial_sfc-io-question.qmd`.
 
 ## Run the tutorial
 
@@ -8,9 +10,10 @@ Minimal SFC-IO tutorial in Quarto (`tutorial_sfc-io.qmd`).
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/EcolEconModels/tutorial_sfc-io/HEAD?urlpath=rstudio)
 
-1. Open the Binder link.
+1. Open Binder.
 2. Wait for RStudio to start.
-3. Open `tutorial_sfc-io.qmd` and run R chunks directly in RStudio.
+3. Open `tutorial_sfc-io.qmd` (answer) or `tutorial_sfc-io-question.qmd` (participant version).
+4. Run chunks or render from RStudio.
 
 ### Option 2: Static HTML (GitHub Pages)
 
@@ -18,18 +21,31 @@ Minimal SFC-IO tutorial in Quarto (`tutorial_sfc-io.qmd`).
 
 ### Option 3: Local (RStudio)
 
-If R + Quarto are already installed:
-
-1. Open the repo in RStudio.
-2. Install required packages once (if needed):
+1. Open this repo in RStudio.
+2. Install required packages once if needed:
    `install.packages(c("jsonlite", "ggplot2", "knitr", "quarto"))`
-3. Generate derived R files from the canonical `.qmd`:
-   `Rscript build_tutorial.R --generate-r --generate-step-r`
-4. Choose one workflow:
-   - Run `.qmd` directly: open `tutorial_sfc-io.qmd` and run R chunks in RStudio (or click **Render**).
-   - Run generated `.R` scripts: open and run `R/tutorial_sfc-io.R` or any step file such as `R/step02_iot_exogenous.R`.
+3. Generate derived files:
+   `Rscript build_tutorial.R --generate-question-qmd --generate-r-answer --generate-r-question`
+4. Choose workflow:
+   - Run `.qmd` directly in RStudio (you can run cells interactively and/or click **Render**).
+   - Run generated `.R` scripts directly, e.g.:
+     - `R/tutorial_sfc-io-answer.R`
+     - `R/tutorial_sfc-io-question.R`
+     - `R/tutorial_sfc-io-answer_step01.R` … `R/tutorial_sfc-io-answer_step05.R`
+     - `R/tutorial_sfc-io-question_step01.R` … `R/tutorial_sfc-io-question_step05.R`
+
+## Build/Sync commands
+
+- Generate question QMD only:
+  `Rscript build_tutorial.R --generate-question-qmd`
+- Check question sync against canonical:
+  `Rscript build_tutorial.R --check-question-sync`
+- Render notebook HTML:
+  `Rscript build_tutorial.R --render-html`
+- Render revealjs slides:
+  `Rscript build_tutorial.R --render-slides`
 
 ## Notes
 
-- Data logic is cache-first, then download, then fail (defined in `tutorial_sfc-io.qmd`).
-- First Binder launch may take a few minutes.
+- Data handling in tutorial code is cache-first, then download, then fail.
+- CI (`.github/workflows/tutorial-sync.yml`) verifies `tutorial_sfc-io-question.qmd` stays synchronized with the canonical answer source.
