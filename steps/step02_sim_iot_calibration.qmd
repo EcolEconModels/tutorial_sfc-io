@@ -300,12 +300,13 @@ calib_snapshot <- list(
   base_year = calib3$base_year,
   n_sectors = calib3$n,
   tau_y = round(calib3$tau_y, 4),
-  G0 = round(calib3$G0, 2),
-  V0 = round(calib3$V0, 2),
-  B0 = round(calib3$B0, 2),
+  G0_mEUR = round(calib3$G0, 2),
+  V0_mEUR = round(calib3$V0, 2),
+  B0_mEUR = round(calib3$B0, 2),
   sum_beta_C = round(sum(calib3$beta_C), 6),
   sum_beta_G = round(sum(calib3$beta_G), 6),
-  energy_idx = calib3$idx
+  energy_idx = calib3$idx,
+  monetary_unit = core_config$iot_unit
 )
 calib_snapshot
 ```
@@ -437,14 +438,14 @@ if (!all(is.finite(y_b))) stop("Non-finite debt values in Step 2 core plot.", ca
 if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
 if (y_b[1] == y_b[2]) y_b <- y_b + c(-1, 1) * max(1, 0.05 * abs(y_b[1]))
 plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", ylim = y_gdp,
+     xlab = "year", ylab = "GDP (million EUR)", ylim = y_gdp,
      main = paste0("GDP: base g_G=", base_g_G))
 lines(step2_core_play$year, step2_core_play$GDP, lwd = 2, col = "firebrick")
 legend("topleft",
        legend = c(paste0("base (g_G=", base_g_G, ")"), paste0("play (g_G=", g_G_play, ")")),
        col = c("steelblue", "firebrick"), lty = 1, bty = "n", cex = 0.85)
 plot(step2_baseline$year, step2_baseline$B, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "Gov debt B", ylim = y_b,
+     xlab = "year", ylab = "Gov debt B (million EUR)", ylim = y_b,
      main = paste0("Debt B: base g_G=", base_g_G))
 lines(step2_core_play$year, step2_core_play$B, lwd = 2, col = "firebrick")
 par(mfrow = c(1, 1))
@@ -476,12 +477,12 @@ if (!all(is.finite(y_v))) stop("Non-finite wealth values in Step 2 optional plot
 if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
 if (y_v[1] == y_v[2]) y_v <- y_v + c(-1, 1) * max(1, 0.05 * abs(y_v[1]))
 plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", ylim = y_gdp, main = paste0("GDP: base c_v=", base_c_v))
+     xlab = "year", ylab = "GDP (million EUR)", ylim = y_gdp, main = paste0("GDP: base c_v=", base_c_v))
 lines(step2_opt_play$year, step2_opt_play$GDP, lwd = 2, col = "darkgreen")
 legend("topleft", legend = c(paste0("base (c_v=", base_c_v, ")"), paste0("play (c_v=", c_v_play, ")")),
        col = c("steelblue", "darkgreen"), lty = 1, bty = "n", cex = 0.85)
 plot(step2_baseline$year, step2_baseline$V, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "HH wealth V", ylim = y_v, main = paste0("Wealth: base c_v=", base_c_v))
+     xlab = "year", ylab = "HH wealth V (million EUR)", ylim = y_v, main = paste0("Wealth: base c_v=", base_c_v))
 lines(step2_opt_play$year, step2_opt_play$V, lwd = 2, col = "darkgreen")
 par(mfrow = c(1, 1))
 ```

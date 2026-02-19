@@ -399,7 +399,7 @@ transition_anchor_info <- data.frame(
 transition_anchor_info
 
 share_diag <- data.frame(
-  metric = c('min_betaC_brown', 'max_betaC_brown', 'min_betaC_green', 'max_betaC_green', 'final_GDP'),
+  metric = c('min_betaC_brown', 'max_betaC_brown', 'min_betaC_green', 'max_betaC_green', 'final_GDP_mEUR'),
   value = c(
     min(step3_play$betaC_brown, na.rm = TRUE),
     max(step3_play$betaC_brown, na.rm = TRUE),
@@ -428,7 +428,7 @@ y_gdp <- range(c(step3_base$GDP, step3_play$GDP), na.rm = TRUE)
 if (!all(is.finite(y_gdp))) stop("Non-finite GDP values in Step 3 core plot.", call. = FALSE)
 if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
 plot(step3_base$year, step3_base$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", ylim = y_gdp, main = "Step 3 Core: GDP")
+     xlab = "year", ylab = "GDP (million EUR)", ylim = y_gdp, main = "Step 3 Core: GDP")
 lines(step3_play$year, step3_play$GDP, lwd = 2, col = "firebrick")
 legend("topleft",
        legend = c(paste0("base (s=", transition_speed_base, ")"), paste0("play (s=", transition_speed_play, ")")),

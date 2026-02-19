@@ -392,6 +392,10 @@ Extract the final year and display key macro/CO2 indicators by scenario.
 ```{r final_snapshot}
 last_year <- max(step6_compare$year)
 summary_final <- step6_compare[step6_compare$year == last_year, c("scenario", "GDP", "V", "B", "TB", "CO2_Mt")]
+names(summary_final)[names(summary_final) == "GDP"] <- "GDP_mEUR"
+names(summary_final)[names(summary_final) == "V"] <- "V_mEUR"
+names(summary_final)[names(summary_final) == "B"] <- "B_mEUR"
+names(summary_final)[names(summary_final) == "TB"] <- "TB_mEUR"
 summary_final <- summary_final[order(summary_final$scenario), ]
 rownames(summary_final) <- NULL
 summary_final

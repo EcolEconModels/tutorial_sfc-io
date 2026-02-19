@@ -311,11 +311,12 @@ row_snapshot <- list(
   base_year = calib4$base_year,
   n_sectors = calib4$n,
   tau_y = round(calib4$tau_y, 4),
-  EX0_total = round(sum(calib4$EX_i0), 2),
+  EX0_total_mEUR = round(sum(calib4$EX_i0), 2),
   mean_import_propensity = round(mean(calib4$m_i), 4),
   max_import_propensity = round(max(calib4$m_i), 4),
-  V0 = round(calib4$V0, 2),
-  B0 = round(calib4$B0, 2)
+  V0_mEUR = round(calib4$V0, 2),
+  B0_mEUR = round(calib4$B0, 2),
+  monetary_unit = core_config$iot_unit
 )
 row_snapshot
 ```
@@ -347,12 +348,12 @@ if (!all(is.finite(y_tb))) stop("Non-finite TB values in Step 4 core plot.", cal
 if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
 if (y_tb[1] == y_tb[2]) y_tb <- y_tb + c(-1, 1) * max(1, 0.05 * abs(y_tb[1]))
 plot(step4_baseline$year, step4_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", ylim = y_gdp, main = paste0("Step 4 Core: GDP (base m=", base_import_leakage_scale, ")"))
+     xlab = "year", ylab = "GDP (million EUR)", ylim = y_gdp, main = paste0("Step 4 Core: GDP (base m=", base_import_leakage_scale, ")"))
 lines(step4_core_play$year, step4_core_play$GDP, lwd = 2, col = "firebrick")
 legend("topleft", legend = c(paste0("base (m=", base_import_leakage_scale, ")"), paste0("play (m=", import_leakage_scale_play, ")")),
        col = c("steelblue", "firebrick"), lty = 1, bty = "n", cex = 0.85)
 plot(step4_baseline$year, step4_baseline$TB, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "TB = EX - IM", ylim = y_tb, main = paste0("Step 4 Core: TB (base m=", base_import_leakage_scale, ")"))
+     xlab = "year", ylab = "TB = EX - IM (million EUR)", ylim = y_tb, main = paste0("Step 4 Core: TB (base m=", base_import_leakage_scale, ")"))
 lines(step4_core_play$year, step4_core_play$TB, lwd = 2, col = "firebrick")
 par(mfrow = c(1, 1))
 ```
@@ -375,12 +376,12 @@ if (!all(is.finite(y_tb))) stop("Non-finite TB values in Step 4 optional plot.",
 if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
 if (y_tb[1] == y_tb[2]) y_tb <- y_tb + c(-1, 1) * max(1, 0.05 * abs(y_tb[1]))
 plot(step4_baseline$year, step4_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", ylim = y_gdp, main = paste0("GDP: base ex_g=", base_ex_growth))
+     xlab = "year", ylab = "GDP (million EUR)", ylim = y_gdp, main = paste0("GDP: base ex_g=", base_ex_growth))
 lines(step4_opt$year, step4_opt$GDP, lwd = 2, col = "darkgreen")
 legend("topleft", legend = c(paste0("base (ex_g=", base_ex_growth, ")"), paste0("play (ex_g=", ex_growth_play, ")")),
        col = c("steelblue", "darkgreen"), lty = 1, bty = "n", cex = 0.85)
 plot(step4_baseline$year, step4_baseline$TB, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "TB = EX - IM", ylim = y_tb, main = paste0("TB: base ex_g=", base_ex_growth))
+     xlab = "year", ylab = "TB = EX - IM (million EUR)", ylim = y_tb, main = paste0("TB: base ex_g=", base_ex_growth))
 lines(step4_opt$year, step4_opt$TB, lwd = 2, col = "darkgreen")
 par(mfrow = c(1, 1))
 ```

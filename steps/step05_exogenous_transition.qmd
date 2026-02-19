@@ -292,7 +292,7 @@ if (!all(is.finite(y_ratio))) stop("Non-finite brown/green ratio in Step 5 core 
 if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
 if (y_ratio[1] == y_ratio[2]) y_ratio <- y_ratio + c(-1, 1) * max(1, 0.05 * abs(y_ratio[1]))
 plot(step5_baseline$year, step5_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", ylim = y_gdp, main = "Step 5 Core: GDP by closure")
+     xlab = "year", ylab = "GDP (million EUR)", ylim = y_gdp, main = "Step 5 Core: GDP by closure")
 lines(step5_closure_play$year, step5_closure_play$GDP, lwd = 2, col = "firebrick")
 legend("topleft", legend = c(paste0("base (", base_closure, ")"), paste0("play (", closure_play, ")")),
        col = c("steelblue", "firebrick"), lty = 1, bty = "n", cex = 0.8)
