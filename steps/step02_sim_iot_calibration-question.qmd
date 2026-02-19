@@ -53,16 +53,6 @@ Helper functions (file paths):
 - `build_sim_iot_from_data()` is in `R/helpers/calibration.R`.
 - JSON/cache utilities are in `R/helpers/cache_io.R` and `R/helpers/jsonstat_parse.R`.
 
-Local function in this step file:
-- `simulate_sim_iot_baseline()` is defined in chunk `step2_functions_baseline` in `steps/step02_sim_iot_calibration.qmd`.
-
-Where key variables are set in this step:
-- `core_config` is created in chunk `step2_run_config`.
-- Fitted objects `core_iot`, `core_wealth`, `calib3` are built in chunk `step2_run_calibrate`.
-- Calibration checks are printed in `step2_calibration_snapshot`.
-- Baseline simulation output `step2_baseline` is created in `step2_run_baseline`.
-- Participant play variables are set in `step2_play_core_fiscal` (`g_G_play`) and `step2_play_optional_cv` (`c_v_play`).
-
 ## Step 2: SIM + IOT Baseline Calibration
 
 ### Objective
@@ -71,14 +61,14 @@ Integrate SIM stocks-flows with an empirical IO production block, calibrate one 
 
 ### Why this step matters
 
-This is where the tutorial moves from a pure macro accounting model to an empirically grounded structural production system. Participants see exactly how national accounts and IO data anchor the simulation.
+This is where we move from a pure macro accounting model to an empirically grounded structural production system. We see how national accounts and IO data anchor the simulation.
 
 ### What changed from Step 1
 
 - Added sector production structure from the symmetric IOT (`A`, `L`).
 - Added calibration from observed base-year data (`tau_y`, demand shares, value-added shares, import leakage).
 - Kept the same SIM stock-flow core for wealth/debt accumulation.
-- No transition mechanism yet: this step is the baseline reference path.
+- No energy transition mechanism yet: this step is the baseline reference path.
 
 ### Equations
 
@@ -104,6 +94,12 @@ Symbol glossary:
 - `tau_y`, `c_y`, `c_v`: fiscal and behavioral coefficients.
 - `V`, `B`: household net financial wealth and government debt.
 
+Naming bridge from Step 1 (to avoid symbol confusion):
+- `c_y` in Step 2 is the same economic object as Step 1 `alpha1` (propensity to consume out of disposable income).
+- `c_v` in Step 2 is the same as Step 1 `alpha2` (propensity to consume out of wealth).
+- `tau_y` in Step 2 is the same role as Step 1 `theta` (effective income-tax rate in the closure).
+- Why names differ: in IO-integrated steps we use mnemonic names tied to accounting role (`c_*`, `tau_*`) because more behavioral and policy blocks are added.
+
 Model status in Step 2:
 - Exogenous (simulation path): `G` growth assumption, `I_i` path.
 - Endogenous: `x`, `Y`, `T`, `YD`, `C`, `V`, `B` paths.
@@ -114,8 +110,6 @@ Where tutorial-wide variables are set and where participants should edit:
 - Base-year fitted/calibrated objects are created in `step2_run_calibrate` (`core_iot`, `core_wealth`, `calib3`).
 - Baseline behavioral/policy settings used in simulation are function arguments in `simulate_sim_iot_baseline()` (`c_y`, `c_v`, `g_G`).
 - Participant play levers are in explicit play chunks: `g_G_play` (core) and `c_v_play` (optional).
-
-Reference note: step structure mirrors SFC teaching progression (Six Lectures) and scenario-baseline framing common in MacroStat-style tutorials.
 
 ### TFM (Step 2 additions first)
 
@@ -148,17 +142,19 @@ Investment treatment in this tutorial (equation-level clarification):
 
 ### BSM (Step 2 stock mapping)
 
-| Stock | Households | Government | Sum |
-|---|---:|---:|---:|
-| Wealth / bills `V (=B)` | `+V` | `-B` | `0` |
+| Stock | Households | Government | Production (IOT aggregate) | Sum |
+|---|---:|---:|---:|---:|
+| Wealth / bills `V (=B)` | `+V` | `-B` | `0` | `0` |
+| Net worth `NW` | `+NW_h` | `+NW_g` | `+NW_p` | `0` |
 
 Net-worth identities (column-sum closure):
 - `NW_h = V`
 - `NW_g = -B`
-- with `V = B`, `NW_h + NW_g = 0`
+- `NW_p = 0`
+- with `V = B`, `NW_h + NW_g + NW_p = 0`
 
 How this relates to sector detail:
-- In this minimal closure, production sectors carry no explicit financial assets/liabilities in the BSM.
+- In this minimal closure, production is explicitly included in the BSM but with zero net financial position (`NW_p = 0`).
 - A fully sector-expanded BSM could assign firm equity/debt per sector `i`; aggregate net worth would still sum to zero across sectors and institutions.
 
 Step 2 change vs Step 1: production is mapped through the IOT (`x = Lf`), while stock-flow closure remains the SIM wealth/debt core.
@@ -191,7 +187,12 @@ Step 2 change vs Step 1: production is mapped through the IOT (`x = Lf`), while 
 3. Identify sector rows/columns, extract intermediate matrix `Z`, and base output vector `x0`.
 4. Construct technical coefficients `A = Z / x0` and Leontief inverse `L = (I - A)^{-1}`.
 5. Extract base final-demand components (`C_i0`, `G_i0`, `I_i0`, `EX_i0`) and imports row.
-6. Build calibrated vectors (`m_i`, `va_coeff`, `beta_C`, `beta_G`) and aggregate anchors (`Y0`, `G0`).
+6. Build calibrated vectors (`m_i`, `va_coeff`, `beta_C`, `beta_G`) and aggregate anchors (`Y0`, `G0`):
+   - Import leakage vector: `m_i = imports_i / x0` (bounded to keep the simple tutorial dynamics well-behaved).
+   - Value-added coefficients: `va_coeff_i = VA_i / x0_i`, so sector outputs can be aggregated to GDP via `Y_t = sum_i va_coeff_i x_i,t`.
+   - Demand-share vectors: `beta_C_i = C_i0 / sum(C_i0)` and `beta_G_i = G_i0 / sum(G_i0)`, so aggregate `C_t` and `G_t` are mapped back into sectoral final-demand vectors.
+   - Macro anchors: `Y0 = sum_i va_coeff_i x0_i` and `G0 = sum_i G_i0` provide the base-year scale for the SIM recursion.
+   - Economic meaning: this is the bridge from sectoral accounting data to a macro-consistent SIM+IO simulation state.
 7. Save the calibrated IOT object as `.rds` in cache for fast repeat runs.
 
 This gives us the minimum reusable helper layer for Step 2: deterministic data access, deterministic JSON parsing, and deterministic IOT calibration inputs for the simulation code below.
@@ -252,7 +253,7 @@ core_config_view
 
 Calibrate SIM+IOT from Step 2 data.
 
-Detailed fitting logic:
+Detailed calibration logic:
 1. `download_or_load_iot(core_config)` loads one base-year IO object and returns sector-level structure (`A`, `L`, `va_coeff`, demand vectors, import coefficients).
 2. `load_wealth_init(core_config)` loads initial household wealth and government debt stocks (`V0`, `B0`) from financial balance-sheet data.
 3. `build_sim_iot_from_data(core_iot, core_wealth)` creates the simulation calibration object by explicit assignment from those data objects.
@@ -269,8 +270,6 @@ Pseudo-code of the actual calibration algorithm in `build_sim_iot_from_data()`:
    - metadata: `sector_codes`, `sector_labels`, `n`
 4. Store structural and metadata fields needed by this and later steps.
 5. Return calibration object `calib3` (pure direct mapping from data; no iteration/regression/optimization).
-
-Note: transition anchor sectors (`idx_brown`, `idx_green`) are introduced pedagogically in Step 3, where they are first used.
 
 What this calibration is (and is not):
 - It is **not** an iterative fit, regression, or optimization.
@@ -382,7 +381,9 @@ Economic meaning of this run:
 Algorithm reminder: each period solves `C_t`, builds `f_t`, computes `x_t = L f_t`, aggregates to `Y_t`, then updates `V_t` and `B_t`.
 
 ```{r step2_run_baseline}
-step2_baseline <- simulate_sim_iot_baseline(calib3, T = 20)
+base_g_G <- 0.01
+base_c_v <- 0.03
+step2_baseline <- simulate_sim_iot_baseline(calib3, T = 20, g_G = base_g_G, c_v = base_c_v)
 ```
 
 Run quick fit-quality diagnostics for the first simulated year.
@@ -421,27 +422,39 @@ step2_core_play <- simulate_sim_iot_baseline(calib3, T = 20, g_G = g_G_play)
 
 Plot Step 2 core comparison.
 
-How to read the two panels together:
-- Left panel (GDP): demand-side multiplier effect of the fiscal rule change.
-- Right panel (debt): stock accumulation implied by deficits under the same rule.
-- Joint interpretation: a debt increase with stronger GDP can still improve/maintain fiscal ratios depending on growth and tax response.
+How to read the two panels together (what is actually happening in this model):
+- Left panel (GDP): even when `g_G = 0`, GDP can still move because consumption has a wealth term (`c_v * V_{t-1}`) and the system may start away from its medium-run fixed point.
+- Right panel (debt `B`): debt evolves by `B_t = B_{t-1} + DEF_t`, with `DEF_t = G_t - TAX_t`.
+- So debt can fall even with positive government spending if taxes rise enough (`TAX_t = tau_y * Y_t`) to create a surplus (`DEF_t < 0`).
+- In this comparison, changing `g_G` shifts demand directly via `G_t` and indirectly via income/tax feedback. GDP and debt need not move in the same direction every year.
 
 ```{r step2_plot_core, fig.height=4, fig.width=7}
-par(mfrow = c(1, 2))
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1), cex.main = 0.9)
+y_gdp <- range(c(step2_baseline$GDP, step2_core_play$GDP), na.rm = TRUE)
+y_b <- range(c(step2_baseline$B, step2_core_play$B), na.rm = TRUE)
+if (!all(is.finite(y_gdp))) stop("Non-finite GDP values in Step 2 core plot.", call. = FALSE)
+if (!all(is.finite(y_b))) stop("Non-finite debt values in Step 2 core plot.", call. = FALSE)
+if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
+if (y_b[1] == y_b[2]) y_b <- y_b + c(-1, 1) * max(1, 0.05 * abs(y_b[1]))
 plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", main = "Step 2 Core: GDP")
+     xlab = "year", ylab = "GDP", ylim = y_gdp,
+     main = paste0("GDP: base g_G=", base_g_G))
 lines(step2_core_play$year, step2_core_play$GDP, lwd = 2, col = "firebrick")
-legend("topleft", legend = c("baseline", paste0("g_G=", g_G_play)), col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+legend("topleft",
+       legend = c(paste0("base (g_G=", base_g_G, ")"), paste0("play (g_G=", g_G_play, ")")),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n", cex = 0.85)
 plot(step2_baseline$year, step2_baseline$B, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "Gov debt B", main = "Step 2 Core: Debt")
+     xlab = "year", ylab = "Gov debt B", ylim = y_b,
+     main = paste0("Debt B: base g_G=", base_g_G))
 lines(step2_core_play$year, step2_core_play$B, lwd = 2, col = "firebrick")
 par(mfrow = c(1, 1))
 ```
 
 ### Insight (Step 2 core play)
 
-- Higher `g_G` raises demand and typically raises both GDP and debt in this closure.
-- The debt path must be read jointly with GDP and tax ratios, not in isolation.
+- Higher `g_G` raises demand and usually raises GDP through the IO multiplier.
+- Debt does not mechanically rise: it rises only when `G_t > TAX_t`; if GDP/taxes rise strongly enough, debt can stabilize or fall.
+- Read GDP, deficit (`G - TAX`), and debt jointly; debt is a stock that integrates the sequence of annual deficits.
 
 
 
@@ -453,15 +466,22 @@ Compare both GDP and wealth panels to see whether the extra demand dominates the
 
 ```{r step2_play_optional_cv}
 c_v_play <- 0.06  # TODO [optional:step2_cv] Change c_v and compare baseline wealth/GDP dynamics Hint: Try 0.01, 0.03, 0.06
-step2_opt_play <- simulate_sim_iot_baseline(calib3, T = 20, c_v = c_v_play)
+step2_opt_play <- simulate_sim_iot_baseline(calib3, T = 20, c_v = c_v_play, g_G = base_g_G)
 
-par(mfrow = c(1, 2))
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1), cex.main = 0.9)
+y_gdp <- range(c(step2_baseline$GDP, step2_opt_play$GDP), na.rm = TRUE)
+y_v <- range(c(step2_baseline$V, step2_opt_play$V), na.rm = TRUE)
+if (!all(is.finite(y_gdp))) stop("Non-finite GDP values in Step 2 optional plot.", call. = FALSE)
+if (!all(is.finite(y_v))) stop("Non-finite wealth values in Step 2 optional plot.", call. = FALSE)
+if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
+if (y_v[1] == y_v[2]) y_v <- y_v + c(-1, 1) * max(1, 0.05 * abs(y_v[1]))
 plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", main = "Step 2 Optional: GDP")
+     xlab = "year", ylab = "GDP", ylim = y_gdp, main = paste0("GDP: base c_v=", base_c_v))
 lines(step2_opt_play$year, step2_opt_play$GDP, lwd = 2, col = "darkgreen")
-legend("topleft", legend = c("baseline", paste0("c_v=", c_v_play)), col = c("steelblue", "darkgreen"), lty = 1, bty = "n")
+legend("topleft", legend = c(paste0("base (c_v=", base_c_v, ")"), paste0("play (c_v=", c_v_play, ")")),
+       col = c("steelblue", "darkgreen"), lty = 1, bty = "n", cex = 0.85)
 plot(step2_baseline$year, step2_baseline$V, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "HH wealth V", main = "Step 2 Optional: Wealth")
+     xlab = "year", ylab = "HH wealth V", ylim = y_v, main = paste0("Wealth: base c_v=", base_c_v))
 lines(step2_opt_play$year, step2_opt_play$V, lwd = 2, col = "darkgreen")
 par(mfrow = c(1, 1))
 ```

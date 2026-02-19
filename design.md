@@ -76,7 +76,7 @@ Each step should have one core play and one optional play, framed as an economic
 - Step 3 (endogenous transition, core):
   - Core play: change endogenous transition pressure/speed and compare macro path and sector reallocation.
   - Optional play: vary transition signal sensitivity (asymmetry) and compare brown/green demand-share dynamics.
-- Step 4 (RoW-lite, core):
+- Step 4 (SIM+IOT+RoW, core):
   - Core play: change import leakage and compare GDP and trade-balance dynamics.
   - Optional play: change export growth and compare external-demand-led versus domestic-demand-led growth paths.
 - Step 5 (IOT + exogenous transition, advanced/optional):
@@ -110,7 +110,7 @@ Question variant generation principle:
    - Step 1 file defines only SIM functions.
    - Step 2 file defines SIM+IOT baseline-fit functions (including shared IO setup used by core flow).
    - Step 3 file defines endogenous-transition functions using the Step 2 fitted model.
-   - Step 4 file defines only RoW-lite functions.
+   - Step 4 file defines only SIM+IOT+RoW functions.
    - Step 5 file defines only IOT/closure exogenous-transition functions (advanced section).
    - Step 6 file defines only emissions functions.
 
@@ -179,7 +179,7 @@ The following decisions are additive and do not remove prior scope/content decis
    - `steps/step01_sim.qmd`
    - `steps/step02_sim_iot_calibration.qmd`
    - `steps/step03_endogenous_transition.qmd`
-   - `steps/step04_row_lite.qmd`
+   - `steps/step04_sim_iot_rowlite.qmd`
    - `steps/step05_exogenous_transition.qmd`
    - `steps/step06_emissions.qmd`
 

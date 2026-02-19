@@ -99,10 +99,29 @@ Symbol glossary:
 - `beta_C,t`: time-varying household demand composition vector.
 - `x_green`, `x_brown`: selected energy-sector outputs used for endogenous signal.
 
+Why two transition parameters (and not one):
+- `transition_speed` sets the policy/behavioral baseline pace of reallocation (how much would shift if there were no endogenous signal effect).
+- `transition_signal_weight` sets feedback strength from current structure (`signal_t`) to next shift (path dependence/amplification).
+- Keeping them separate lets you ask two distinct questions: "faster planned transition" versus "stronger endogenous reinforcement".
+
 Model status in Step 3:
 - Exogenous: fiscal parameters and baseline assumptions inherited from Step 2.
 - Endogenous: transition share updates and all macro/sector paths.
 - Calibrated: still the Step 2 base-year calibration object.
+
+Scope of the transition mechanism in this step (important):
+- Only household demand composition (`beta_C`) is transitioned. Government composition (`beta_G`) is fixed on purpose, to isolate one mechanism at a time.
+- Why not transition government demand here? To keep identification clean: Step 3 asks what household-side composition change alone does. You can add a `beta_G` shift in an extension step.
+- This is a demand-side energy-transition proxy, not a full structural/technological transition model.
+- Shares are reallocated with `sum_i beta_C,i = 1` each period, so we move demand across sectors rather than creating extra demand by construction.
+- Aggregate consumption level `C_t` is still determined by the behavioral equation (`c_y`, `c_v`), while `beta_C` only controls sector allocation of that `C_t`.
+- `A` and `Z` are fixed at base-year values in Step 3, so production technology/intermediate structure does not transition endogenously here.
+- Implication: this step estimates reallocation effects through fixed technology; a fuller transition model would allow time-varying `A_t`/`Z_t` (and likely endogenous investment/learning).
+
+Two-parameter transition equation (same as code, written to separate roles):
+- `shift_t = transition_speed * (1 + transition_signal_weight * signal_t)` clipped to feasible range.
+- `transition_speed` controls baseline pace.
+- `transition_signal_weight` controls endogenous amplification/damping around that baseline pace.
 
 ### TFM (Step 3)
 
@@ -127,14 +146,16 @@ Sector-expansion interpretation:
 
 ### BSM (Step 3)
 
-| Stock | Households | Government | Sum |
-|---|---:|---:|---:|
-| Wealth / bills `V (=B)` | `+V` | `-B` | `0` |
+| Stock | Households | Government | Production (IOT aggregate) | Sum |
+|---|---:|---:|---:|---:|
+| Wealth / bills `V (=B)` | `+V` | `-B` | `0` | `0` |
+| Net worth `NW` | `+NW_h` | `+NW_g` | `+NW_p` | `0` |
 
 Net-worth identities:
 - `NW_h = V`
 - `NW_g = -B`
-- with `V = B`, `NW_h + NW_g = 0`.
+- `NW_p = 0`
+- with `V = B`, `NW_h + NW_g + NW_p = 0`.
 
 ### Stability conditions (practical)
 
@@ -253,7 +274,6 @@ Why this design is useful:
 - Only one mechanism is added relative to Step 2 (share dynamics), so causal interpretation is clean.
 - All accounting identities remain the same, reducing ambiguity about what drives differences.
 
-```
 Transition anchor sectors used in this step (where `idx_brown` and `idx_green` come from).
 
 These indices are detected by `find_energy_indices()` during calibration, then used here for endogenous share transfer.
@@ -276,7 +296,7 @@ transition_sector_map <- data.frame(
 transition_sector_map
 ```
 
-{r step3_functions_endogenous_transition}
+```{r step3_functions_endogenous_transition}
 simulate_sim_iot_endogenous_transition <- function(calib,
                                                    T = 20,
                                                    c_y = 0.82,
@@ -346,8 +366,19 @@ Economic meaning: you are changing the pace of endogenous demand reallocation, n
 After running, compare the new path against Step 2 baseline to isolate structural-composition effects on GDP and shares.
 
 ```{r step3_play_core_transition_speed}
+transition_speed_base <- 0
+transition_signal_weight_base <- 1
 transition_speed_play <- 0.001  # TODO [core:step3_speed] Change endogenous transition speed and compare GDP/energy-share paths Hint: Try 0.001 then 0.004
-step3_play <- simulate_sim_iot_endogenous_transition(calib3, T = 20, transition_speed = transition_speed_play)
+step3_base <- simulate_sim_iot_endogenous_transition(
+  calib3, T = 20,
+  transition_speed = transition_speed_base,
+  transition_signal_weight = transition_signal_weight_base
+)
+step3_play <- simulate_sim_iot_endogenous_transition(
+  calib3, T = 20,
+  transition_speed = transition_speed_play,
+  transition_signal_weight = transition_signal_weight_base
+)
 ```
 
 Print quick structural diagnostics for the transition run.
@@ -358,6 +389,15 @@ Purpose of diagnostics:
 - Macro check: final GDP level provides quick context before plotting full paths.
 
 ```{r step3_transition_diagnostics}
+transition_anchor_info <- data.frame(
+  role = c('brown', 'green'),
+  sector_code = calib3$sector_codes[c(calib3$idx$idx_brown, calib3$idx$idx_green)],
+  sector_label = calib3$sector_labels[c(calib3$idx$idx_brown, calib3$idx$idx_green)],
+  betaC_initial = c(step3_base$betaC_brown[1], step3_base$betaC_green[1]),
+  stringsAsFactors = FALSE
+)
+transition_anchor_info
+
 share_diag <- data.frame(
   metric = c('min_betaC_brown', 'max_betaC_brown', 'min_betaC_green', 'max_betaC_green', 'final_GDP'),
   value = c(
@@ -371,24 +411,44 @@ share_diag <- data.frame(
 share_diag
 ```
 
+Why brown share can start very low (this is not a bug):
+- `beta_C` comes directly from base-year household final demand shares in the chosen IOT classification.
+- In many recent EU tables, direct household demand share for the selected brown anchor (`C19`: refined petroleum/coke products) is small, so `betaC_brown` starts low.
+- The printed `transition_anchor_info` table above shows the exact sector codes/labels and their initial shares for your active dataset.
+
 Plot Step 3 core comparison.
 
 How to interpret panel 1 (GDP): difference from baseline shows macro consequence of composition reallocation.
 How to interpret panel 2 (shares): confirms whether and how fast the structural shift actually occurred.
 Reading both together avoids misinterpretation: GDP can move even with modest share shifts if affected sectors have high multiplier/value-added content.
 
-```{r step3_plot_core, fig.height=4.5, fig.width=9}
-par(mfrow = c(1, 2))
-plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", main = "Step 3 Core: GDP")
+```{r step3_plot_core, fig.height=4.8, fig.width=9.5}
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1), cex.main = 0.9)
+y_gdp <- range(c(step3_base$GDP, step3_play$GDP), na.rm = TRUE)
+if (!all(is.finite(y_gdp))) stop("Non-finite GDP values in Step 3 core plot.", call. = FALSE)
+if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
+plot(step3_base$year, step3_base$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", ylim = y_gdp, main = "Step 3 Core: GDP")
 lines(step3_play$year, step3_play$GDP, lwd = 2, col = "firebrick")
-legend("topleft", legend = c("baseline", paste0("transition speed=", transition_speed_play)),
-       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
-plot(step3_play$year, step3_play$betaC_brown, type = "l", lwd = 2, col = "firebrick",
-     xlab = "year", ylab = "share", main = "Step 3 Core: demand shares")
-lines(step3_play$year, step3_play$betaC_green, lwd = 2, col = "darkgreen")
-legend("right", legend = c("brown share", "green share"),
-       col = c("firebrick", "darkgreen"), lty = 1, bty = "n")
+legend("topleft",
+       legend = c(paste0("base (s=", transition_speed_base, ")"), paste0("play (s=", transition_speed_play, ")")),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n", cex = 0.85, xpd = NA)
+
+share_rng <- range(c(step3_base$betaC_brown, step3_base$betaC_green, step3_play$betaC_brown, step3_play$betaC_green), na.rm = TRUE)
+share_pad <- 0.05 * diff(share_rng)
+if (!is.finite(share_pad) || share_pad == 0) share_pad <- 0.002
+plot(step3_base$year, step3_base$betaC_brown, type = "l", lwd = 2, col = "firebrick", lty = 2,
+     xlab = "year", ylab = "share",
+     ylim = c(max(0, share_rng[1] - share_pad), min(1, share_rng[2] + share_pad)),
+     main = paste0("Step 3 Core: demand shares (base s=", transition_speed_base, ")"))
+lines(step3_play$year, step3_play$betaC_brown, lwd = 2, col = "firebrick", lty = 1)
+lines(step3_base$year, step3_base$betaC_green, lwd = 2, col = "darkgreen", lty = 2)
+lines(step3_play$year, step3_play$betaC_green, lwd = 2, col = "darkgreen", lty = 1)
+points(step3_play$year, step3_play$betaC_green, pch = 16, cex = 0.35, col = "darkgreen")
+legend("topright",
+       legend = c("brown base", "brown play", "green base", "green play"),
+       col = c("firebrick", "firebrick", "darkgreen", "darkgreen"),
+       lty = c(2, 1, 2, 1), bty = "n", cex = 0.8, xpd = NA)
 par(mfrow = c(1, 1))
 ```
 
@@ -402,13 +462,20 @@ Compare dashed vs solid lines to see whether feedback amplifies or dampens struc
 transition_signal_weight_play <- 0.5  # TODO [optional:step3_signal] Change transition signal sensitivity and compare brown/green share dynamics Hint: Try 0.5, 1.0, 1.8
 step3_opt <- simulate_sim_iot_endogenous_transition(calib3, T = 20, transition_speed = transition_speed_play, transition_signal_weight = transition_signal_weight_play)
 
+share_rng_opt <- range(c(step3_play$betaC_brown, step3_opt$betaC_brown, step3_play$betaC_green, step3_opt$betaC_green), na.rm = TRUE)
+share_pad_opt <- 0.05 * diff(share_rng_opt)
+if (!is.finite(share_pad_opt) || share_pad_opt == 0) share_pad_opt <- 0.002
 plot(step3_play$year, step3_play$betaC_brown, type = "l", lwd = 2, col = "firebrick",
-     xlab = "year", ylab = "beta_C shares", main = "Step 3 Optional: signal sensitivity")
+     xlab = "year", ylab = "beta_C shares",
+     ylim = c(max(0, share_rng_opt[1] - share_pad_opt), min(1, share_rng_opt[2] + share_pad_opt)),
+     main = paste0("Step 3 Optional: signal w (s=", transition_speed_play, ")"))
 lines(step3_opt$year, step3_opt$betaC_brown, lwd = 2, col = "firebrick", lty = 2)
 lines(step3_play$year, step3_play$betaC_green, lwd = 2, col = "darkgreen")
 lines(step3_opt$year, step3_opt$betaC_green, lwd = 2, col = "darkgreen", lty = 2)
-legend("right", legend = c("brown base", "brown play", "green base", "green play"),
-       col = c("firebrick", "firebrick", "darkgreen", "darkgreen"), lty = c(1, 2, 1, 2), bty = "n")
+legend("topright",
+       legend = c(paste0("brown base (w=", transition_signal_weight_base, ")"), paste0("brown play (w=", transition_signal_weight_play, ")"),
+                  paste0("green base (w=", transition_signal_weight_base, ")"), paste0("green play (w=", transition_signal_weight_play, ")")),
+       col = c("firebrick", "firebrick", "darkgreen", "darkgreen"), lty = c(1, 2, 1, 2), bty = "n", cex = 0.78, xpd = NA)
 ```
 
 

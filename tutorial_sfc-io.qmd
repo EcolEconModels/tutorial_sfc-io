@@ -15,27 +15,34 @@ This repository now uses **standalone step tutorials**.
 
 ## Answer Tutorials
 
-1. [Step 1: SIM](steps/step01_sim.qmd)
-2. [Step 2: SIM + IOT Baseline Calibration](steps/step02_sim_iot_calibration.qmd)
-3. [Step 3: Endogenous Transition](steps/step03_endogenous_transition.qmd)
-4. [Step 4: RoW-lite](steps/step04_row_lite.qmd)
-5. [Step 5: Exogenous Transition](steps/step05_exogenous_transition.qmd)
-6. [Step 6: Emissions](steps/step06_emissions.qmd)
+1. [Step 1: SIM](answer/step01.html)
+2. [Step 2: SIM + IOT Baseline Calibration](answer/step02.html)
+3. [Step 3: Endogenous Transition](answer/step03.html)
+4. [Step 4: SIM+IOT+RoW](answer/step04.html)
+5. [Step 5: Exogenous Transition](answer/step05.html)
+6. [Step 6: Emissions](answer/step06.html)
 
 ## Question Tutorials
 
-Question variants are generated from step answer files using:
+1. [Step 1 Question](question/step01.html)
+2. [Step 2 Question](question/step02.html)
+3. [Step 3 Question](question/step03.html)
+4. [Step 4 Question](question/step04.html)
+5. [Step 5 Question](question/step05.html)
+6. [Step 6 Question](question/step06.html)
+
+Question source files are generated from answer files using:
 
 ```bash
 Rscript build_tutorial.R --generate-question-steps
 ```
 
-Generated files:
+Generated source files:
 
 1. `steps/step01_sim-question.qmd`
 2. `steps/step02_sim_iot_calibration-question.qmd`
 3. `steps/step03_endogenous_transition-question.qmd`
-4. `steps/step04_row_lite-question.qmd`
+4. `steps/step04_sim_iot_rowlite-question.qmd`
 5. `steps/step05_exogenous_transition-question.qmd`
 6. `steps/step06_emissions-question.qmd`
 

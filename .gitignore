@@ -56,3 +56,5 @@ R/tutorial_sfc-io*.R
 
 # RStudio Connect
 rsconnect/
+
+/.quarto/

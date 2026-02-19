@@ -6,7 +6,7 @@ step_answer_qmd <- c(
   "steps/step01_sim.qmd",
   "steps/step02_sim_iot_calibration.qmd",
   "steps/step03_endogenous_transition.qmd",
-  "steps/step04_row_lite.qmd",
+  "steps/step04_sim_iot_rowlite.qmd",
   "steps/step05_exogenous_transition.qmd",
   "steps/step06_emissions.qmd"
 )
@@ -162,11 +162,20 @@ if (flags$render_html) {
     for (i in seq_along(step_answer_qmd)) generate_question_qmd(step_answer_qmd[i], step_question_qmd[i])
   }
 
+  # Avoid duplicate rendered files in steps/: publish from docs/ only.
+  stale_render <- c(
+    sub('\\.qmd$', '.html', step_answer_qmd),
+    sub('\\.qmd$', '.html', step_question_qmd),
+    sub('\\.qmd$', '.knit.md', c(step_answer_qmd, step_question_qmd))
+  )
+  unlink(stale_render, force = TRUE)
+
   message("Rendering answer step pages...")
   for (i in seq_along(step_answer_qmd)) {
     must_succeed("quarto", c("render", step_answer_qmd[i], "--to", "html"))
     src_html <- sub("\\.qmd$", ".html", step_answer_qmd[i])
     file.copy(src_html, file.path("docs/answer", paste0(step_ids[i], ".html")), overwrite = TRUE)
+    if (file.exists(src_html)) file.remove(src_html)
   }
 
   message("Rendering question step pages...")
@@ -174,6 +183,7 @@ if (flags$render_html) {
     must_succeed("quarto", c("render", step_question_qmd[i], "--to", "html"))
     src_html <- sub("\\.qmd$", ".html", step_question_qmd[i])
     file.copy(src_html, file.path("docs/question", paste0(step_ids[i], ".html")), overwrite = TRUE)
+    if (file.exists(src_html)) file.remove(src_html)
   }
 }
 

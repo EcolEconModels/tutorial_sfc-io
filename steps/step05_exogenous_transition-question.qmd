@@ -130,14 +130,21 @@ Step-5 interpretation:
 
 ### BSM (Step 5)
 
-| Stock | Households | Government | Sum |
-|---|---:|---:|---:|
-| Wealth / bills `V (=B)` | `+V` | `-B` | `0` |
+| Stock | Households | Government | Production (IOT aggregate) | Sum |
+|---|---:|---:|---:|---:|
+| Wealth / bills `V (=B)` | `+V` | `-B` | `0` | `0` |
+| Net worth `NW` | `+NW_h` | `+NW_g` | `+NW_p` | `0` |
 
 Net-worth identities:
 - `NW_h = V`
 - `NW_g = -B`
-- with `V = B`, `NW_h + NW_g = 0`.
+- `NW_p = 0` (in this minimal closure, production has no autonomous financial stock)
+- with `V = B`, `NW_h + NW_g + NW_p = 0`.
+
+Interpretation for Step 5:
+- Closure rules change how output adjusts across production sectors.
+- They do **not** add new institutional financial assets/liabilities in this minimal setup.
+- So production appears explicitly as a sector in BSM, with net worth set to zero by construction.
 
 Define Step 5 exogenous-transition function.
 
@@ -238,13 +245,17 @@ Run baseline closure path.
 Use baseline closure and fixed aggregate growth target.
 Store GDP and energy-sector paths as the comparison baseline.
 ```{r step5_run_baseline}
+base_closure <- "residual-others"
+base_g_target <- 0.01
+base_eps_green <- 0.04
+base_eps_brown <- -0.04
 step5_baseline <- simulate_iot_exogenous_transition(
   iot,
   T = step5_T,
-  closure_option = "residual-others",
-  g_target = 0.01,
-  eps_green = 0.04,
-  eps_brown = -0.04,
+  closure_option = base_closure,
+  g_target = base_g_target,
+  eps_green = base_eps_green,
+  eps_brown = base_eps_brown,
   max_iter = step5_max_iter
 )
 ```
@@ -260,9 +271,9 @@ step5_closure_play <- simulate_iot_exogenous_transition(
   iot,
   T = step5_T,
   closure_option = closure_play,
-  g_target = 0.01,
-  eps_green = 0.04,
-  eps_brown = -0.04,
+  g_target = base_g_target,
+  eps_green = base_eps_green,
+  eps_brown = base_eps_brown,
   max_iter = step5_max_iter
 )
 ```
@@ -271,17 +282,24 @@ Plot closure comparison.
 
 Overlay GDP paths to isolate closure sensitivity.
 ```{r step5_plot_core, fig.height=4.5, fig.width=9}
-par(mfrow = c(1, 2))
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1), cex.main = 0.9)
+y_gdp <- range(c(step5_baseline$GDP, step5_closure_play$GDP), na.rm = TRUE)
+ratio_base <- step5_baseline$X_brown / pmax(step5_baseline$X_green, 1e-9)
+ratio_play <- step5_closure_play$X_brown / pmax(step5_closure_play$X_green, 1e-9)
+y_ratio <- range(c(ratio_base, ratio_play), na.rm = TRUE)
+if (!all(is.finite(y_gdp))) stop("Non-finite GDP values in Step 5 core plot.", call. = FALSE)
+if (!all(is.finite(y_ratio))) stop("Non-finite brown/green ratio in Step 5 core plot.", call. = FALSE)
+if (y_gdp[1] == y_gdp[2]) y_gdp <- y_gdp + c(-1, 1) * max(1, 0.05 * abs(y_gdp[1]))
+if (y_ratio[1] == y_ratio[2]) y_ratio <- y_ratio + c(-1, 1) * max(1, 0.05 * abs(y_ratio[1]))
 plot(step5_baseline$year, step5_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", main = "Step 5 Core: GDP by closure")
+     xlab = "year", ylab = "GDP", ylim = y_gdp, main = "Step 5 Core: GDP by closure")
 lines(step5_closure_play$year, step5_closure_play$GDP, lwd = 2, col = "firebrick")
-legend("topleft", legend = c("baseline", paste0("play: ", closure_play)),
-       col = c("steelblue", "firebrick"), lty = 1, bty = "n")
-plot(step5_baseline$year, step5_baseline$X_brown / pmax(step5_baseline$X_green, 1e-9),
-     type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "X_brown / X_green", main = "Step 5 Core: sector mix")
-lines(step5_closure_play$year, step5_closure_play$X_brown / pmax(step5_closure_play$X_green, 1e-9),
-      lwd = 2, col = "firebrick")
+legend("topleft", legend = c(paste0("base (", base_closure, ")"), paste0("play (", closure_play, ")")),
+       col = c("steelblue", "firebrick"), lty = 1, bty = "n", cex = 0.8)
+plot(step5_baseline$year, ratio_base,
+     type = "l", lwd = 2, col = "steelblue", ylim = y_ratio,
+     xlab = "year", ylab = "X_brown / X_green", main = paste0("Step 5 Core: mix (base ", base_closure, ")"))
+lines(step5_closure_play$year, ratio_play, lwd = 2, col = "firebrick")
 par(mfrow = c(1, 1))
 ```
 
@@ -295,17 +313,24 @@ eps_brown_play <- -eps_green_play
 step5_eps_play <- simulate_iot_exogenous_transition(
   iot,
   T = step5_T,
-  closure_option = "residual-others",
-  g_target = 0.01,
+  closure_option = base_closure,
+  g_target = base_g_target,
   eps_green = eps_green_play,
   eps_brown = eps_brown_play,
   max_iter = step5_max_iter
 )
 
-ggplot2::ggplot(step5_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9))) +
-  ggplot2::geom_line(linewidth = 1, color = "firebrick") +
-  ggplot2::labs(title = "Step 5 Optional: brown/green output ratio", y = "X_brown / X_green") +
-  ggplot2::theme_minimal()
+ratio_base <- step5_baseline$X_brown / pmax(step5_baseline$X_green, 1e-9)
+ratio_play <- step5_eps_play$X_brown / pmax(step5_eps_play$X_green, 1e-9)
+y_ratio <- range(c(ratio_base, ratio_play), na.rm = TRUE)
+if (!all(is.finite(y_ratio))) stop("Non-finite brown/green ratio in Step 5 optional plot.", call. = FALSE)
+if (y_ratio[1] == y_ratio[2]) y_ratio <- y_ratio + c(-1, 1) * max(1, 0.05 * abs(y_ratio[1]))
+plot(step5_baseline$year, ratio_base, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "X_brown / X_green", ylim = y_ratio,
+     main = paste0("Step 5 Optional: base eps_g=", base_eps_green))
+lines(step5_eps_play$year, ratio_play, lwd = 2, col = "darkgreen")
+legend("topright", legend = c(paste0("base (eps_g=", base_eps_green, ")"), paste0("play (eps_g=", eps_green_play, ")")),
+       col = c("steelblue", "darkgreen"), lty = 1, bty = "n", cex = 0.85)
 ```
 
 

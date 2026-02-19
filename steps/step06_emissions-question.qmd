@@ -127,17 +127,22 @@ From column sums:
 
 ### BSM (Step 6)
 
-| Position | Households | Government | Domestic external account | RoW | Sum |
+| Position | Households | Government | Production | RoW | Sum |
 |---|---:|---:|---:|---:|---:|
 | Government bills `V (=B)` | `+V` | `-B` | `0` | `0` | `0` |
 | Net foreign assets `NFA` | `0` | `0` | `+NFA` | `-NFA` | `0` |
+| Net worth `NW` | `+NW_h` | `+NW_g` | `+NW_p` | `+NW_row` | `0` |
 
 Net-worth identities:
 - `NW_h = V`
 - `NW_g = -B`
-- `NW_dom_ext = NFA`
+- `NW_p = NFA` (production column carries domestic external position in this compact setup)
 - `NW_row = -NFA`
-- aggregate closure: `NW_h + NW_g + NW_dom_ext + NW_row = 0`.
+- with `V = B`, `NW_h + NW_g + NW_p + NW_row = 0`.
+
+Interpretation for Step 6:
+- Emissions accounting is added on top of the same institutional stock-flow structure as Step 4.
+- Production remains an explicit institutional column, and RoW mirrors the foreign-asset position.
 
 Declare emissions configuration (first appearance in tutorial).
 
@@ -179,7 +184,7 @@ These helpers keep Step 6 simulation logic clean: the simulation loop only needs
 
 Define Step 6 simulation wrapper with stored sector output.
 
-Algorithm: run the RoW-lite macro loop while storing sectoral output vectors `x_t` each period.
+Algorithm: run the SIM+IOT+RoW macro loop while storing sectoral output vectors `x_t` each period.
 Later chunks multiply those `x_t` paths by AEA intensities to compute production CO2.
 This is the only new simulation code in Step 6; loading/alignment helpers are reused from earlier helper files.
 ```{r step6_functions_emissions}
@@ -287,8 +292,8 @@ step6_base <- attach_production_emissions(step6_baseline_sim, aea_intensity, iot
 step6_trans <- attach_production_emissions(step6_transition_sim, aea_intensity, iot_emis$sector_codes)
 
 step6_compare <- rbind(
-  data.frame(step6_base, scenario = "baseline"),
-  data.frame(step6_trans, scenario = paste0("transition:", transition_speed_emis_play))
+  data.frame(step6_base, scenario = paste0("base (s=", 0, ")")),
+  data.frame(step6_trans, scenario = paste0("play (s=", transition_speed_emis_play, ")"))
 )
 ```
 
@@ -297,9 +302,13 @@ Plot Step 6 core comparison.
 Plot production CO2 for baseline and transition on the same axes.
 This is the main emissions comparison figure.
 ```{r step6_plot_core, fig.height=4, fig.width=7}
+y_co2 <- range(step6_compare$CO2_Mt, na.rm = TRUE)
+if (!all(is.finite(y_co2))) stop("Non-finite CO2 values in Step 6 core plot.", call. = FALSE)
+if (y_co2[1] == y_co2[2]) y_co2 <- y_co2 + c(-1, 1) * max(1e-6, 0.05 * abs(y_co2[1]))
 ggplot2::ggplot(step6_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
   ggplot2::geom_line(linewidth = 1) +
-  ggplot2::labs(title = "Step 6 Core Play: direct production CO2", y = "Mt CO2") +
+  ggplot2::coord_cartesian(ylim = y_co2) +
+  ggplot2::labs(title = paste0("Step 6 Core: production CO2 (base s=0, play s=", transition_speed_emis_play, ")"), y = "Mt CO2") +
   ggplot2::theme_minimal()
 ```
 
@@ -334,16 +343,29 @@ Optional play: sensitivity to intensity decline.
 Apply an exogenous decline factor to intensities.
 Recompute CO2 for the transition run to separate activity effects from intensity effects.
 ```{r step6_play_optional_intensity_decline}
+intensity_decline_base <- 0
 intensity_decline_play <- 0.0  # TODO [optional:step6_intensity] Apply annual intensity decline and compare CO2 path Hint: This is exogenous decarbonization of direct intensity
 
+aea_intensity_base <- aea_intensity
+aea_intensity_base$intensity_kg_per_meur <- aea_intensity_base$intensity_kg_per_meur * (1 - intensity_decline_base)
 aea_intensity_play <- aea_intensity
 aea_intensity_play$intensity_kg_per_meur <- aea_intensity_play$intensity_kg_per_meur * (1 - intensity_decline_play)
 
+step6_base_opt <- attach_production_emissions(step6_transition_sim, aea_intensity_base, iot_emis$sector_codes)
 step6_play <- attach_production_emissions(step6_transition_sim, aea_intensity_play, iot_emis$sector_codes)
 
-ggplot2::ggplot(step6_play, ggplot2::aes(year, CO2_Mt)) +
-  ggplot2::geom_line(linewidth = 1, color = "darkred") +
-  ggplot2::labs(title = "Step 6 Optional: with intensity decline", y = "Mt CO2") +
+step6_opt_compare <- rbind(
+  data.frame(step6_base_opt, scenario = paste0("base (d=", intensity_decline_base, ")")),
+  data.frame(step6_play, scenario = paste0("play (d=", intensity_decline_play, ")"))
+)
+
+y_co2_opt <- range(step6_opt_compare$CO2_Mt, na.rm = TRUE)
+if (!all(is.finite(y_co2_opt))) stop("Non-finite CO2 values in Step 6 optional plot.", call. = FALSE)
+if (y_co2_opt[1] == y_co2_opt[2]) y_co2_opt <- y_co2_opt + c(-1, 1) * max(1e-6, 0.05 * abs(y_co2_opt[1]))
+ggplot2::ggplot(step6_opt_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::coord_cartesian(ylim = y_co2_opt) +
+  ggplot2::labs(title = paste0("Step 6 Optional: intensity decline (base d=", intensity_decline_base, ", play d=", intensity_decline_play, ")"), y = "Mt CO2") +
   ggplot2::theme_minimal()
 ```
 
@@ -379,4 +401,4 @@ summary_final
 
 - Prices are fixed.
 - No banking, portfolio, or inventories.
-- RoW-lite is pedagogical; MRIO is required for full footprint attribution.
+- SIM+IOT+RoW is pedagogical; MRIO is required for full footprint attribution.
