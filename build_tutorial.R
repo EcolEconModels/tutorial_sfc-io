@@ -4,7 +4,7 @@ args <- commandArgs(trailingOnly = TRUE)
 
 step_answer_qmd <- c(
   "steps/step01_sim.qmd",
-  "steps/step02_sim_iot_fit.qmd",
+  "steps/step02_sim_iot_calibration.qmd",
   "steps/step03_endogenous_transition.qmd",
   "steps/step04_row_lite.qmd",
   "steps/step05_exogenous_transition.qmd",

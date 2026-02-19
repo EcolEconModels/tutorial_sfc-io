@@ -38,35 +38,115 @@ source(file.path(helper_dir, 'iot_load.R'))
 source(file.path(helper_dir, 'config_wealth.R'))
 ```
 
+
+### Function and Variable Location Map
+
+This step uses IO/data helpers plus closure solver utilities.
+
+Helper functions (file paths):
+- `make_core_config()` in `R/helpers/config_wealth.R`.
+- `download_or_load_iot()`, `find_energy_indices()` in `R/helpers/iot_load.R`.
+- Closure solver functions (`solve_io_consistency` and related options) are sourced from `closure_utils.R` in chunk `step5_functions_exogenous_transition`.
+
+Local function in this step file:
+- `simulate_iot_exogenous_transition()` is defined in chunk `step5_functions_exogenous_transition`.
+
+Where key variables are set in this step:
+- `core_iot` (and `core_config` if missing) are prepared in `step5_run_load_iot`.
+- Baseline run `step5_baseline` is created in `step5_run_baseline`.
+- Core play variable `closure_play` is set in `step5_play_core_closure`.
+- Optional play variable `eps_green_play` (and implied `eps_brown`) is set in `step5_play_optional_eps`.
+
 ## Step 5: IOT Load + Exogenous Transition (Advanced/Optional)
 
 ### Objective
 
-Use the same loaded IOT structure to run an exogenous 20-year energy transition under alternative closure assumptions.
+Run an exogenous energy transition experiment where green/brown targets are imposed and closure rules determine how the rest of the economy adjusts.
+
+### Why this step matters
+
+This step teaches closure logic explicitly: different assumptions can produce different sector-adjustment paths even under the same headline growth targets.
+
+### What changed from Step 4
+
+- Transition is now imposed exogenously (targets), not generated endogenously.
+- Closure options are made explicit and compared.
+- This is advanced/optional and intended as a methodological deep dive.
 
 ### Equations
 
-Step 5 is the exogenous-transition variant: energy-sector growth targets are imposed externally and closure assumptions determine where remaining adjustment falls.
-This is deliberately different from Step 3 (endogenous shares) and is presented as an advanced closure experiment.
+Economic question: with fixed aggregate and sector targets, which additional closure assumptions are needed to produce a consistent IO path?
 
-Core IO-consistency problem each year:
-- Technology update from base transactions and new output guess: `A_t = Z_base / x_t` (column-wise)
-- Output-demand consistency: `x_t = (I - A_t)^(-1) f_t`
-- Exogenous targets for energy sectors: `g_green = eps_green`, `g_brown = eps_brown`
-- Aggregate growth target: `g_target` for total output/value-added
-- Closure rule allocates residual adjustment to non-target sectors and/or final demand components.
+Core yearly consistency problem:
+- Technology update from base transactions and output guess: `A_t = Z_base / x_t`
+- IO consistency: `x_t = (I - A_t)^(-1) f_t`
+- Exogenous targets: `g_green = eps_green`, `g_brown = eps_brown`, aggregate `g_target`
+- Closure decides how remaining sectors/final demand absorb residual adjustment.
 
-Why closure is needed:
-- With two sector targets (`green`, `brown`) plus an aggregate growth target, the system is underdetermined.
-- Closure options (`residual-others`, `fixed-others`, `uniform-demand`, `eps-only`) impose extra assumptions so one consistent path is selected.
+Underdetermination (equation counting intuition):
+- Imposing two energy targets plus one aggregate growth target usually leaves more unknown sector adjustments than independent constraints.
+- Therefore extra closure assumptions are required to select one feasible path.
 
-Economic meaning of symbols:
-- `eps_green`, `eps_brown`: exogenous annual growth rates imposed on energy sectors.
-- `g_target`: economy-wide growth target used by the closure.
-- `g_other`: implied growth rate for non-target sectors under the chosen closure.
-- `rel_io_resid`: IO consistency residual from the fixed-point solve; should remain small in successful runs.
+Closure options (economic interpretation):
+- `residual-others`: non-target sectors absorb remaining adjustment.
+- `fixed-others`: non-target sectors are held close to baseline and demand adjusts elsewhere.
+- `uniform-demand`: adjustment spreads broadly across demand components.
+- `eps-only`: follow only sector target rates with minimal additional balancing restrictions.
+
+Symbol glossary:
+- `eps_green`, `eps_brown`: imposed sector growth rates.
+- `g_target`: aggregate growth target.
+- `g_other`: implied adjustment for non-target sectors.
+- `rel_io_resid`: numerical consistency residual from iterative solve.
+
+Model status in Step 5:
+- Exogenous: target growth rates and closure choice.
+- Endogenous: sector outputs and implied residual growth allocation.
+- Calibrated: base IO structure from loaded IOT.
+
+Reference note: closure sensitivity emphasis follows structural-transition SFC-IO work such as Pettena & Raberto (2025).
+
+
+### TFM (Step 5)
+
+| Flow | Households | Government | Production (IOT aggregate) | Sum |
+|---|---:|---:|---:|---:|
+| Income `Y` | `+Y` | `0` | `-Y` | `0` |
+| Taxes `T` | `-T` | `+T` | `0` | `0` |
+| Consumption `C` | `-C` | `0` | `+C` | `0` |
+| Government demand `G` | `0` | `-G` | `+G` | `0` |
+| Change in wealth/debt `Delta_V (= Delta_B)` | `-Delta_V` | `+Delta_B` | `0` | `0` |
+| Column sum | 0 | 0 | 0 | 0 |
+
+From column sums:
+- `Delta_V = YD - C`.
+- `Delta_B = G - T`.
+- `Y = C + G`.
+- `Delta_V = Delta_B`.
+
+Step-5 interpretation:
+- Exogenous transition targets and closure options change the **sector allocation** behind production, while these compact institutional stock-flow identities stay the same.
+- A fully sector-expanded TFM would show the target sectors and residual sectors explicitly.
+
+### BSM (Step 5)
+
+| Stock | Households | Government | Sum |
+|---|---:|---:|---:|
+| Wealth / bills `V (=B)` | `+V` | `-B` | `0` |
+
+Net-worth identities:
+- `NW_h = V`
+- `NW_g = -B`
+- with `V = B`, `NW_h + NW_g = 0`.
 
 Define Step 5 exogenous-transition function.
+
+### Algorithm (pseudo-code)
+
+1. Choose closure option and sector targets (`eps_green`, `eps_brown`, `g_target`).
+2. For each year, solve IO consistency under that closure.
+3. Record sector outputs and implied residual adjustments.
+4. Compare alternative closures under identical targets.
 
 Pseudo-code: each year call the closure solver, enforce exogenous brown/green rates, and store GDP plus energy-sector outputs.
 ```{r step5_functions_exogenous_transition}
@@ -174,7 +254,7 @@ Core play: switch closure option.
 Run identical targets under a different closure rule and compare GDP path response.
 ```{r step5_play_core_closure}
 closure_options <- c("residual-others", "fixed-others", "uniform-demand", "eps-only")
-closure_play <- closure_options[2]  # @exercise[id=step5_closure;kind=core;question_expr=closure_options[3];prompt="Switch closure option and inspect GDP and green/brown paths";hint="Compare fixed-others vs uniform-demand"]
+closure_play <- closure_options[3]  # @exercise[id=step5_closure;kind=core;question_expr=closure_options[3];prompt="Switch closure option and inspect GDP and green/brown paths";hint="Compare fixed-others vs uniform-demand"]
 
 step5_closure_play <- simulate_iot_exogenous_transition(
   iot,
@@ -190,19 +270,26 @@ step5_closure_play <- simulate_iot_exogenous_transition(
 Plot closure comparison.
 
 Overlay GDP paths to isolate closure sensitivity.
-```{r step5_plot_core, fig.height=4, fig.width=7}
+```{r step5_plot_core, fig.height=4.5, fig.width=9}
+par(mfrow = c(1, 2))
 plot(step5_baseline$year, step5_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", main = "Step 5 Core Play: closure effect on GDP")
+     xlab = "year", ylab = "GDP", main = "Step 5 Core: GDP by closure")
 lines(step5_closure_play$year, step5_closure_play$GDP, lwd = 2, col = "firebrick")
 legend("topleft", legend = c("baseline", paste0("play: ", closure_play)),
        col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+plot(step5_baseline$year, step5_baseline$X_brown / pmax(step5_baseline$X_green, 1e-9),
+     type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "X_brown / X_green", main = "Step 5 Core: sector mix")
+lines(step5_closure_play$year, step5_closure_play$X_brown / pmax(step5_closure_play$X_green, 1e-9),
+      lwd = 2, col = "firebrick")
+par(mfrow = c(1, 1))
 ```
 
 Optional play: strengthen exogenous transition rates.
 
 Change green/brown target rates and inspect the brown/green output ratio path.
 ```{r step5_play_optional_eps}
-eps_green_play <- 0.06  # @exercise[id=step5_eps;kind=optional;question_expr=0.02;prompt="Change exogenous green growth target and compare brown/green ratio";hint="Use eps_brown = -eps_green"]
+eps_green_play <- 0.02  # @exercise[id=step5_eps;kind=optional;question_expr=0.02;prompt="Change exogenous green growth target and compare brown/green ratio";hint="Use eps_brown = -eps_green"]
 eps_brown_play <- -eps_green_play
 
 step5_eps_play <- simulate_iot_exogenous_transition(
@@ -220,6 +307,17 @@ ggplot2::ggplot(step5_eps_play, ggplot2::aes(year, X_brown / pmax(X_green, 1e-9)
   ggplot2::labs(title = "Step 5 Optional: brown/green output ratio", y = "X_brown / X_green") +
   ggplot2::theme_minimal()
 ```
+
+
+### Insight (Step 5)
+
+- Under the same headline targets, closure choices redistribute adjustment differently across sectors.
+- Report both GDP and sector-mix outcomes; aggregate growth alone hides structural burden sharing.
+
+### What can go wrong / interpretation caveat
+
+- Some closure/target combinations may be numerically feasible but economically implausible.
+- Always inspect residuals and sector trajectories, not only headline GDP.
 
 ### Interpretation
 

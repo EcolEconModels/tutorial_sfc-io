@@ -25,11 +25,33 @@ if (length(missing_packages) > 0) {
 }
 ```
 
+
+### Function and Variable Location Map
+
+This step defines everything locally in this file: `steps/step01_sim.qmd`.
+
+- `simulate_sim_lag()` is defined in chunk `step1_functions_sim_core`.
+- `simulate_sim_current_fp()` is defined in chunk `step1_functions_sim_current`.
+- Baseline SIM parameters (`G`, `theta`, `alpha1`, `alpha2`, `Y0`, `H0`) are set in chunk `step1_run_lag_below`.
+- Comparison run objects (`lag`, `cur`) are set in chunk `step1_run_compare_lag_current`.
+- Core play variable (`Y0_play`) is set in chunk `step1_play_core_initial`.
+- Optional play variable (`alpha2_play`) is set in chunk `step1_play_optional_alpha2`.
+
 ## Step 1: SIM Closed Model (Chapter 3 of Godley & Lavoie 2012 book)
 
 ### Objective
 
 Build a simple (SIM) SFC model with Government, Production and Household sectors. We see that GDP and Wealth reach a steady state after some time! Depending on whether consumption behaviour depends on current year vs previous year income, we need to solve differently
+
+
+### Why this step matters
+
+This is the accounting foundation for all later steps. If we clearly see how deficits, wealth accumulation and output adjustment work in SIM, then adding IOT, RoW and emissions later is much easier to understand.
+
+### What changed from previous step
+
+This is the first economic model step, so there is no previous dynamics to compare with. In this step we introduce the baseline accounting logic and two timing variants (SIM-lag and SIM-current).
+
 
 ### Equations
 
@@ -42,6 +64,7 @@ Build a simple (SIM) SFC model with Government, Production and Household sectors
 -   Household Wealth / change in wealth `H_t = H_{t-1} + YD_t - C_t`
 -   Government deficit/debt: `DEF_t = G_t - T_t`, `B_t = B_{t-1} + DEF_t`
 -   Fixed point of GDP: `Y* = G / theta`
+-   Fixed point consumption: `C* = (1-theta) * Y*`
 
 Transaction Flow Matrix (TFM, one period, sign by sector column):
 
@@ -52,8 +75,11 @@ Transaction Flow Matrix (TFM, one period, sign by sector column):
 | Consumption `C`                       |       `-C` |        `0` |       `+C` | `0` |
 | Government demand `G`                 |        `0` |       `-G` |       `+G` | `0` |
 | Change in bills `Delta_H (= Delta_B)` | `-Delta_H` | `+Delta_B` |        `0` | `0` |
+| Column sum                           |        `0` |        `0` |        `0` | `0` |
 
 From column sums: - Households: `Y - T - C - Delta_H = 0`, so `Delta_H = Y - T - C`. - Government: `T - G + Delta_B = 0`, so `Delta_B = G - T`. - Production: `-Y + C + G = 0`, so `Y = C + G`. - Stock-flow consistency: `Delta_H = Delta_B`.
+
+Column-sum check (explicit): household column sum = 0, government column sum = 0, production column sum = 0.
 
 Balance Sheet Matrix (BSM, simplified SIM view):
 
@@ -108,6 +134,7 @@ alpha1 <- 0.6 # fraction consumption out of income
 alpha2 <- 0.2 # fraction consumption out of wealth
 # fixed points for GDP and wealth
 Y_star <- G / theta
+C_star <- (1 - theta) * Y_star
 H_star <- ((1 - alpha1) * (1 - theta) * Y_star) / alpha2
 
 # setting Y0 below the fixed point, try above the fixed point as well!
@@ -124,13 +151,43 @@ lag$DEF <- G - lag$T_tax
 lag$H_from_DEF <- H0 + cumsum(lag$DEF)
 ```
 
-See if same fixed point is reached with a different initial condition, e.g. above the fixed point
+
+Plot Step 1A accounting paths in one figure.
+
+This plot overlays GDP, consumption, deficit and wealth identities to show the core stock-flow link clearly: government deficit flow accumulates into household wealth.
+
+```{r step1_plot_lag_accounting, fig.height=6, fig.width=10}
+y_all <- c(lag$Y, lag$C, lag$H, lag$H_from_DEF, lag$DEF, Y_star, C_star, H_star)
+plot(lag$t, lag$Y, type = "l", lwd = 2, col = "steelblue",
+     ylim = range(y_all, na.rm = TRUE),
+     xlab = "t", ylab = "level", main = "Step 1A: SIM-lag accounting dynamics")
+lines(lag$t, lag$C, lwd = 2, col = "darkgreen")
+lines(lag$t, lag$DEF, lwd = 2, col = "firebrick")
+lines(lag$t, lag$H_from_DEF, lwd = 4, col = "goldenrod")
+lines(lag$t, lag$H, lwd = 2, col = "black")
+abline(h = Y_star, lty = 2, col = "steelblue")
+abline(h = C_star, lty = 2, col = "darkgreen")
+abline(h = H_star, lty = 2, col = "black")
+legend("right",
+       legend = c("GDP Y", "Consumption C", "Deficit (G - Tax)", "H0 + cumulative deficit", "Wealth H", "Y*", "C*", "H*"),
+       col = c("steelblue", "darkgreen", "firebrick", "goldenrod", "black", "steelblue", "darkgreen", "black"),
+       lty = c(1, 1, 1, 1, 1, 2, 2, 2), lwd = c(2, 2, 2, 4, 2, 1, 1, 1), bty = "n")
+```
+
+Core play: See if same fixed point is reached with a different initial condition, e.g. above the fixed point
 
 How about if we choose `H0` that is not "consistent" with the `Y0`, e.g. 0.0?
 
-SIM-current with Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` is not so easy to simulate, since updates are interdependent. `C_t` depends on current disposable income `YD_t` and past wealth. Current disposable income `YD_t = Y_t - T_t = C_t + G - T_t`. Thus, there is a circularity/interdependence. So we need to solve for these variables consistently with each other.
+SIM-current with Consumption `C_t(current) = alpha1 * YD_t + alpha2 * H_{t-1}` is not so easy to simulate, since updates are interdependent. 
+`C_t` depends on current disposable income `YD_t` and past wealth. 
+Current disposable income `YD_t = Y_t - T_t = C_t + G - T_t`. 
+Thus, there is a circularity/interdependence. 
+So we need to solve for these variables consistently with each other.
 
-For a simple linear system, we can invert directly the system of equations directly. But in general, we perform fixed-point iteration within each period / time step, here a year. In this specific linear SIM-current case, the system reduces to `Y_t = G + alpha1 * (1 - theta) * Y_t + alpha2 * H_{t-1}`. So we can solve directly as `Y_t = (G + alpha2 * H_{t-1}) / (1 - alpha1 * (1 - theta))`. We still use fixed-point iteration on the full block (`C -> Y -> T -> YD -> C`) because that approach extends directly to nonlinear or richer model variants.
+For a simple linear system, we can invert directly the system of equations directly. 
+But in general, we perform fixed-point iteration within each period / time step, here a year. I
+n this specific linear SIM-current case, the system reduces to `Y_t = G + alpha1 * (1 - theta) * Y_t + alpha2 * H_{t-1}`. So we can solve directly as `Y_t = (G + alpha2 * H_{t-1}) / (1 - alpha1 * (1 - theta))`. 
+We still use fixed-point iteration on the full block (`C -> Y -> T -> YD -> C`) because that approach extends directly to nonlinear or richer model variants.
 
 ```{r step1_functions_sim_current}
 simulate_sim_current_fp <- function(T = 20, G = 100, theta = 0.2, alpha1 = 0.6, alpha2 = 0.2,
@@ -183,6 +240,27 @@ legend("right", legend = c("Lag", "Current", "Y*"),
        lty = c(1, 1, 2), bty = "n")
 ```
 
+
+Change initial GDP and compare convergence across lag and current versions.
+
+Set `Y0_play` above fixed point or exactly at fixed point, and compare lag/current convergence under the same parameters.
+
+```{r step1_play_core_initial}
+Y0_play <- 1.3 * Y_star  # @exercise[id=step1_y0;kind=core;question_expr=1.3 * Y_star;prompt="Change initial GDP and compare convergence (below/above/equal to fixed point)";hint="Try 0.7*Y_star, 1.0*Y_star, 1.3*Y_star"]
+H0_play <- (Y0_play * (1 - alpha1 * (1 - theta)) - G) / alpha2
+
+lag_play <- simulate_sim_lag(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_play, H0 = H0_play)
+cur_play <- simulate_sim_current_fp(T = T_h, G = G, theta = theta, alpha1 = alpha1, alpha2 = alpha2, Y0 = Y0_play, H0 = H0_play)
+
+plot(lag_play$t, lag_play$Y, type = "l", lwd = 2, col = "steelblue",
+     xlab = "t", ylab = "GDP", main = "Step 1 Core Play: change initial GDP")
+lines(cur_play$t, cur_play$Y, lwd = 2, col = "darkgreen")
+abline(h = Y_star, lty = 2)
+legend("right", legend = c("Lag", "Current", "Y*"),
+       col = c("steelblue", "darkgreen", "black"),
+       lty = c(1, 1, 2), bty = "n")
+```
+
 Optional play: adjust wealth propensity in both variants.
 
 Vary the propensity to consume out of wealth (alpha2). Rerun both lag and current versions with the new alpha2. Plot the impact on speed of convergence.
@@ -200,6 +278,18 @@ plot(lag_opt$t, lag_opt$Y, type = "l", lwd = 2, col = "steelblue",
 lines(cur_opt$t, cur_opt$Y, lwd = 2, col = "darkgreen")
 legend("right", legend = c("Lag", "Current"), col = c("steelblue", "darkgreen"), lty = 1, bty = "n")
 ```
+
+
+### Insight (Step 1)
+
+- `G` and `theta` determine the fixed point location.
+- `alpha1` and `alpha2` mainly shape transition speed and path.
+- The deficit flow and wealth accumulation track each other by accounting identity.
+
+### What can go wrong / interpretation caveat
+
+- Inconsistent initial values (`Y0`, `H0`) can create strong transients.
+- This is a stripped-down pedagogical model: no prices, banking, inventories, or firm financial structure.
 
 ### Interpretation
 

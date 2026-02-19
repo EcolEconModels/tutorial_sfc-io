@@ -29,6 +29,8 @@ if (length(missing_packages) > 0) {
 ### Dependency Context
 
 This step is standalone: it reuses Step 2 IO/calibration helpers and introduces only the new RoW-lite simulator here.
+Economically, this preserves domestic calibration while adding an external sector channel.
+Algorithmically, helpers provide data and calibration; open-economy dynamics are defined and explained in this step file.
 
 ```{r source_helpers}
 helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
@@ -39,35 +41,77 @@ source(file.path(helper_dir, 'config_wealth.R'))
 source(file.path(helper_dir, 'calibration.R'))
 ```
 
+
+### Function and Variable Location Map
+
+This step reuses helper calibration/loading and defines RoW-lite dynamics locally.
+
+Helper functions (file paths):
+- `make_core_config()`, `load_wealth_init()` in `R/helpers/config_wealth.R`.
+- `download_or_load_iot()` in `R/helpers/iot_load.R`.
+- `build_sim_iot_row_from_data()` in `R/helpers/calibration.R`.
+
+Local function in this step file:
+- `simulate_sim_iot_row_lite()` is defined in chunk `step4_functions_row_lite`.
+
+Where key variables are set in this step:
+- `core_config` is created/printed in `step4_run_config`.
+- RoW calibration object `calib4` and baseline run `step4_baseline` are built in `step4_run_baseline`.
+- Calibration diagnostics are printed in `step4_calibration_snapshot`.
+- Core play variable `import_leakage_scale_play` is set in `step4_play_core_imports`.
+- Optional play variable `ex_growth_play` is set in `step4_play_optional_exports`.
+
 ## Step 4: RoW-lite
 
 ### Objective
 
-Add exports, import leakage, and trade balance tracking.
+Open the calibrated SIM-IOT baseline by adding exports, import leakage, and trade-balance accounting in a minimal RoW-lite closure.
+
+### Why this step matters
+
+Many ecological-economy questions are about demand leakage, external constraints, and trade-offs between domestic growth and external balance. This step introduces that logic without full MRIO complexity.
+
+### What changed from Step 3
+
+- Added explicit export demand and import leakage.
+- Added trade-balance and net-foreign-asset accounting bridge.
+- Kept the Step 3 domestic stock-flow identities unchanged.
 
 ### Equations
 
-Step 4 opens the Step 3 economy by separating domestic final demand, imports, and exports.
-The closure moves from a closed identity (`Y = C + G + I`) to an open one (`Y = C + G + I + EX - IM`) while keeping SIM stock-flow accounting.
+Economic question: how does introducing external demand and import leakage change macro outcomes and accounting closure?
 
 Closed-to-open decomposition:
 - Domestic final demand by sector: `FD_dom,i,t = C_i,t + G_i,t + I_i + EX_i,t`
-- Import leakage by sector: `IM_i,t = m_i * FD_dom,i,t`
-- Net domestic demand for domestic production: `FD_net,i,t = FD_dom,i,t - IM_i,t`
+- Import leakage: `IM_i,t = m_i * FD_dom,i,t`
+- Net domestic demand: `FD_net,i,t = FD_dom,i,t - IM_i,t`
 - Production mapping: `x_t = L * FD_net,t`
-- Trade aggregates: `EX_t = sum_i EX_i,t`, `IM_t = sum_i IM_i,t`, `TB_t = EX_t - IM_t`
+- Trade totals: `EX_t = sum_i EX_i,t`, `IM_t = sum_i IM_i,t`, `TB_t = EX_t - IM_t`
 
-Macro block remains SIM-consistent:
+Macro block (unchanged domestic SFC core):
 - `Y_t = sum_i(v_i * x_i,t)`, `T_t = tau_y * Y_t`, `YD_t = Y_t - T_t`
 - `C_t = c_y * YD_t + c_v * V_{t-1}`
 - `V_t = V_{t-1} + YD_t - C_t`, `B_t = B_{t-1} + (G_t - T_t)`
 
-Economic meaning of symbols:
-- `m_i`: sector-specific import propensity applied to domestic final-demand uses.
-- `EX_i,t`: exogenous export demand for domestic sector `i`.
-- `FD_net`: portion of final demand satisfied by domestic production technology `A`.
-- `TB_t`: trade balance; in this minimal setup it is the period change in net foreign asset position.
-- `Delta_NFA_t = TB_t`: external stock-flow bridge.
+Symbol glossary:
+- `EX_i,t`: exogenous export demand by sector.
+- `m_i`: import propensity applied to domestic final demand.
+- `FD_net`: demand met by domestic production technology.
+- `TB_t`: trade balance in period `t`.
+- `Delta_NFA_t`: net foreign asset change, here equal to `TB_t`.
+
+Model status in Step 4:
+- Exogenous: export path assumptions, import leakage scale scenario.
+- Endogenous: `x`, `Y`, `TB`, `V`, `B` paths.
+- Calibrated: domestic IO/SIM parameters inherited from Step 2 calibration.
+
+### What imports are counted here in this tutorial?
+
+- In this RoW-lite implementation, imports are modeled as proportional leakage from domestic final-demand uses.
+- With total-use national IO tables, some imported content is already embedded in observed technical structure; interpretation must be explicit.
+- Full MRIO would separate foreign technology coefficients and bilateral origins; this step intentionally does not.
+
+Reference note: this is a pedagogical open-economy bridge, not a full global MRIO closure.
 
 ### TFM (RoW-lite extension)
 
@@ -76,6 +120,7 @@ Economic meaning of symbols:
 | Exports `EX` | `0` | `0` | `+EX` | `-EX` | `0` |
 | Imports `IM` | `0` | `0` | `-IM` | `+IM` | `0` |
 | Change in net foreign assets `Delta_NFA` | `0` | `0` | `-Delta_NFA` | `+Delta_NFA` | `0` |
+| Column sum | 0 | 0 | 0 | 0 | 0 |
 
 From column sums:
 - Domestic external account (production proxy): `EX - IM - Delta_NFA = 0`, so `Delta_NFA = TB = EX - IM`.
@@ -103,11 +148,36 @@ Sector-expansion interpretation:
 Step 4 adds external demand (`EX`) and import leakage (`IM`) while keeping domestic SIM-IOT closures unchanged.
 Interpretation: this is RoW-lite (national table + leakage), not full bilateral MRIO accounting.
 
+### Algorithm (pseudo-code)
+
+1. Start from Step 2/3 calibrated domestic structure.
+2. Add exogenous exports and compute import leakage by sector.
+3. Run IO mapping on net domestic demand.
+4. Update macro stocks and flows, then compute `TB = EX - IM`.
+5. Compare GDP and TB under alternative leakage/export assumptions.
+
 Define RoW-lite simulation helper.
 
-Algorithm: keep exports exogenous, compute imports as proportional leakage from domestic final demand.
-Algorithm: feed net demand through the Leontief inverse, then update GDP, taxes, wealth, debt, and TB.
-The endogenous transition channel from Step 3 is retained in demand-share updates.
+Local equations implemented in the next code block:
+- `FD_dom,i,t = C_i,t + G_i,t + I_i + EX_i,t`
+- `IM_i,t = m_eff,i * FD_dom,i,t`
+- `FD_net,i,t = FD_dom,i,t - IM_i,t`
+- `x_t = L * FD_net,t`, `Y_t = sum_i(v_i * x_i,t)`
+- `TB_t = EX_t - IM_t`, with `EX_t = sum_i EX_i,t` and `IM_t = sum_i IM_i,t`
+
+Detailed loop logic for `simulate_sim_iot_row_lite()`:
+1. Initialize domestic stocks and base composition vectors.
+2. Set exogenous export path `EX_i,t` and fiscal path `G_t`.
+3. (Optional) update brown/green demand shares if transition speed is positive.
+4. Build effective import coefficients `m_eff` from calibrated `m_i` and scenario scale.
+5. Compute demand solved by domestic production: `FD_net = FD_dom - IM`.
+6. Map `FD_net` through `L` to get sector output and aggregate GDP.
+7. Update SFC stocks (`V`, `B`) and external balance (`EX`, `IM`, `TB`) each period.
+
+Interpretation note:
+- This function keeps the domestic SFC core unchanged and adds only the external leakage/export channel.
+- That makes policy sensitivity (imports vs exports) easier to interpret in isolation.
+
 ```{r step4_functions_row_lite}
 simulate_sim_iot_row_lite <- function(calib,
                                       T = 20,
@@ -187,22 +257,70 @@ simulate_sim_iot_row_lite <- function(calib,
 
 Build RoW-lite calibration and baseline path.
 
-Reuse Step 2 loading/calibration functions; only the RoW dynamics are new in this step.
-This keeps data handling identical and isolates the impact of opening the economy.
+First, print active core configuration so participants can verify the exact data context.
+
+Economic purpose of this check:
+- Trade and leakage dynamics depend on sector structure and export composition.
+- If configuration changes (country/year/table), parameter interpretation changes too.
+
+```{r step4_run_config}
+core_config <- make_core_config()
+core_config_view <- list(
+  country = core_config$country,
+  year = core_config$year,
+  scope = core_config$scope,
+  table_type = core_config$table_type,
+  iot_dataset = iot_schema(core_config$table_type)$dataset_id,
+  cache_dir = core_config$cache_dir
+)
+core_config_view
+```
+
+How `build_sim_iot_row_from_data()` extends Step 2 calibration:
+1. It keeps all domestic Step 2 calibrated objects (`L`, `va_coeff`, shares, `tau_y`, `V0`, `B0`).
+2. It adds export vector `EX_i0` as the base external-demand anchor.
+3. It adds import coefficients `m_i` needed for RoW leakage dynamics.
+4. It preserves energy-sector indices for optional transition overlays.
+
+In the next chunk, we construct `calib4` and then run baseline with `transition_speed = 0`.
+This keeps Step 4 baseline focused on open-economy effects (exports/imports) before adding any transition mechanism.
+
 ```{r step4_run_baseline}
 if (!exists("calib4", inherits = FALSE)) {
-  core_config <- make_core_config()
   core_iot <- download_or_load_iot(core_config)
   core_wealth <- load_wealth_init(core_config)
-  calib4 <- calibrate_sim_iot_row(core_iot, core_wealth)
+  calib4 <- build_sim_iot_row_from_data(core_iot, core_wealth)
 }
 step4_baseline <- simulate_sim_iot_row_lite(calib4, T = 20, transition_speed = 0)
 ```
 
+Print a compact RoW calibration snapshot.
+
+How to interpret this snapshot:
+- `EX0_total` sets base external-demand scale.
+- Mean/max import propensity indicate expected leakage strength and potential external constraint.
+- `V0`, `B0`, `tau_y` confirm the domestic SFC core remains anchored while opening the economy.
+
+```{r step4_calibration_snapshot}
+row_snapshot <- list(
+  base_year = calib4$base_year,
+  n_sectors = calib4$n,
+  tau_y = round(calib4$tau_y, 4),
+  EX0_total = round(sum(calib4$EX_i0), 2),
+  mean_import_propensity = round(mean(calib4$m_i), 4),
+  max_import_propensity = round(max(calib4$m_i), 4),
+  V0 = round(calib4$V0, 2),
+  B0 = round(calib4$B0, 2)
+)
+row_snapshot
+```
+
 Core play: import leakage.
 
-Scale import leakage up or down.
-Rerun the RoW-lite model and inspect trade-balance and GDP sensitivity.
+This play changes one external parameter: `import_leakage_scale`.
+Economic meaning: higher leakage shifts more demand abroad for a given domestic final-demand level.
+Run this chunk, then compare GDP and `TB` paths to see how domestic multipliers weaken/strengthen with leakage.
+
 ```{r step4_play_core_imports}
 import_leakage_scale_play <- 0.8  # TODO [core:step4_imports] Change import leakage and inspect GDP/trade balance Hint: Above 1 increases leakage, below 1 reduces leakage
 step4_core_play <- simulate_sim_iot_row_lite(calib4, T = 20, import_leakage_scale = import_leakage_scale_play)
@@ -210,20 +328,30 @@ step4_core_play <- simulate_sim_iot_row_lite(calib4, T = 20, import_leakage_scal
 
 Plot Step 4 core comparison.
 
-Compare baseline and play trade-balance paths.
-This plot is the main diagnostic for the RoW-lite extension.
-```{r step4_plot_core, fig.height=4, fig.width=7}
-plot(step4_baseline$year, step4_baseline$TB, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "TB = EX - IM", main = "Step 4 Core Play: trade balance")
-lines(step4_core_play$year, step4_core_play$TB, lwd = 2, col = "firebrick")
+How to read the plot pair:
+- GDP panel: domestic activity response after accounting for leakages.
+- Trade-balance panel: whether scenario shifts the economy toward external surplus or deficit.
+- Joint interpretation: a policy/scenario can raise demand but still worsen external balance if import leakage dominates.
+
+```{r step4_plot_core, fig.height=4.5, fig.width=9}
+par(mfrow = c(1, 2))
+plot(step4_baseline$year, step4_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "GDP", main = "Step 4 Core: GDP")
+lines(step4_core_play$year, step4_core_play$GDP, lwd = 2, col = "firebrick")
 legend("topleft", legend = c("baseline", paste0("play: ", import_leakage_scale_play)),
        col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+plot(step4_baseline$year, step4_baseline$TB, type = "l", lwd = 2, col = "steelblue",
+     xlab = "year", ylab = "TB = EX - IM", main = "Step 4 Core: trade balance")
+lines(step4_core_play$year, step4_core_play$TB, lwd = 2, col = "firebrick")
+par(mfrow = c(1, 1))
 ```
 
 Optional play: export growth.
 
-Change export growth and rerun RoW-lite.
-Inspect GDP to visualize export-led effects.
+This play isolates the export-demand channel by changing `ex_growth`.
+Economic meaning: stronger exogenous foreign demand raises domestic final demand and output through IO multipliers.
+Compare this with the import-leakage play to discuss external-demand-led growth versus leakage-constrained growth.
+
 ```{r step4_play_optional_exports}
 ex_growth_play <- 0.03  # TODO [optional:step4_exports] Change export growth and inspect GDP response Hint: Positive export growth raises final demand
 step4_opt <- simulate_sim_iot_row_lite(calib4, T = 20, ex_growth = ex_growth_play)
@@ -233,6 +361,18 @@ ggplot2::ggplot(step4_opt, ggplot2::aes(year, GDP)) +
   ggplot2::labs(title = "Step 4 Optional: GDP with export growth", y = "GDP") +
   ggplot2::theme_minimal()
 ```
+
+
+### Insight (Step 4 core play)
+
+- Higher import leakage can reduce domestic GDP response even when total demand is similar.
+- Trade-balance movement identifies whether demand expansion is domestic-output-led or import-led.
+- Policy lever insight: domestic industrial strategy and trade structure jointly shape transition multipliers.
+
+### What can go wrong / interpretation caveat
+
+- RoW-lite is not a substitute for MRIO when foreign technology and embodied emissions matter quantitatively.
+- Import leakage parameters are scenario assumptions and should be stress-tested.
 
 ### MRIO caveat (equations/text only)
 

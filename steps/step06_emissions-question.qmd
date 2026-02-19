@@ -40,36 +40,104 @@ source(file.path(helper_dir, 'calibration.R'))
 source(file.path(helper_dir, 'emissions_load.R'))
 ```
 
+
+### Function and Variable Location Map
+
+This step combines prior IO/SFC helpers with emissions-alignment helpers and a local emissions wrapper.
+
+Helper functions (file paths):
+- `make_emissions_config()`, `load_wealth_init()` in `R/helpers/config_wealth.R`.
+- `download_or_load_iot()` in `R/helpers/iot_load.R`.
+- `build_sim_iot_row_from_data()` in `R/helpers/calibration.R`.
+- Emissions helpers (`normalize_nace_code`, `align_iot_to_aea`, `load_aea_emissions`) in `R/helpers/emissions_load.R`.
+
+Local function in this step file:
+- `simulate_row_with_x()` is defined in chunk `step6_functions_emissions`.
+
+Where key variables are set in this step:
+- `emissions_config` is created in `step6_run_emissions_config`.
+- Emissions-calibrated objects (`iot_emis`, `wealth_emis`, `calib5`, `aea_intensity`) are built in `step6_run_calibrate`.
+- Core play variable `transition_speed_emis_play` is set in `step6_play_core_transition`.
+- Optional play variable `intensity_decline_play` is set in `step6_play_optional_intensity_decline`.
+
 ## Step 6: AEA Production Emissions
 
 ### Objective
 
-Attach direct production CO2 coefficients and compare baseline vs transition emissions paths.
+Attach production-based CO2 coefficients to simulated sector outputs and compare baseline vs transition emissions paths.
+
+### Why this step matters
+
+Ecological macro policy needs activity, structure, and emissions accounting in one framework. This step connects macro-structural dynamics to emissions indicators with explicit system boundaries.
+
+### What changed from Step 5
+
+- Added emissions accounting layer to existing macro-IO simulations.
+- Added sector-intensity alignment between IO sectors and AEA data.
+- Kept macro dynamics unchanged to isolate emissions-accounting effects.
 
 ### Equations
 
-Step 6 converts sector output paths into direct production emissions using AEA-aligned intensities.
-The macro-production simulation is unchanged; only the accounting layer for emissions is added.
+Economic question: how much of emissions change comes from activity scale, structural composition, and intensity assumptions?
 
-Production emissions accounting:
-- Sector intensity (kg per monetary output): `s_i = CO2_i / x_i`
-- Period production emissions: `CO2_t = sum_i(s_i * x_i,t)`
+Production-based emissions accounting:
+- Intensity: `s_i = CO2_i / x_i`
+- Period emissions: `CO2_t = sum_i(s_i * x_i,t)`
 - Reporting conversion: `CO2_Mt,t = CO2_t / 1e9`
 
-Data alignment logic:
-- IO sectors are normalized/matched to AEA NACE categories.
-- Intensities are estimated from base-year AEA emissions and base-year IO output.
-- Simulated `x_i,t` paths (from RoW-lite loop) are multiplied by fixed `s_i` unless sensitivity modifies intensities.
+Simple decomposition lens for scenario comparison:
+- Activity effect: emissions change from total output scale.
+- Structural effect: emissions change from sector composition at similar scale.
+- Intensity effect: emissions change from changing `s_i` (e.g., exogenous intensity decline).
 
-Economic meaning of symbols:
-- `x_i,t`: domestic production in sector `i` from SIM-IOT-RoW dynamics.
-- `s_i`: direct production emission intensity for sector `i`.
-- `CO2_t`: production-based (territorial production) emissions, not consumption footprint.
-- `intensity_decline`: optional exogenous factor for technical decarbonization sensitivity.
+Boundary clarification:
+- Implemented: production-based emissions (territorial production boundary).
+- Not implemented: consumption-based footprint requiring imported embodied intensities (MRIO logic).
 
-Boundary note (equations/text only):
-- Consumption-based emissions would add imported emission content using foreign technologies (MRIO-style).
-- This tutorial implements production-based emissions only, to keep boundaries explicit and minimal.
+Symbol glossary:
+- `x_i,t`: sector output path from macro-IO simulation.
+- `s_i`: direct production intensity by sector.
+- `CO2_t`: total production emissions in period `t`.
+- `intensity_decline`: exogenous decarbonization assumption in optional play.
+
+Model status in Step 6:
+- Exogenous: intensity assumptions and optional decline scenario.
+- Endogenous: output-driven emissions path under fixed boundary definition.
+- Calibrated: base-year intensity alignment from AEA + IO data.
+
+Reference note: production-vs-consumption boundary distinction is essential in MRIO-informed ecological macro analysis.
+
+### TFM (Step 6)
+
+| Flow | Households | Government | Production | RoW | Sum |
+|---|---:|---:|---:|---:|---:|
+| Income `Y` | `+Y` | `0` | `-Y` | `0` | `0` |
+| Taxes `T` | `-T` | `+T` | `0` | `0` | `0` |
+| Consumption `C` | `-C` | `0` | `+C` | `0` | `0` |
+| Government demand `G` | `0` | `-G` | `+G` | `0` | `0` |
+| Exports `EX` | `0` | `0` | `+EX` | `-EX` | `0` |
+| Imports `IM` | `0` | `0` | `-IM` | `+IM` | `0` |
+| Financial stock changes `Delta_V, Delta_B` | `-Delta_V` | `+Delta_B` | `0` | `0` | `0` |
+| Change in net foreign assets `Delta_NFA` | `0` | `0` | `-Delta_NFA` | `+Delta_NFA` | `0` |
+| Column sum | 0 | 0 | 0 | 0 | 0 |
+
+From column sums:
+- `Delta_V = YD - C`, `Delta_B = G - T`, and `Delta_V = Delta_B`.
+- `Delta_NFA = EX - IM = TB`.
+
+### BSM (Step 6)
+
+| Position | Households | Government | Domestic external account | RoW | Sum |
+|---|---:|---:|---:|---:|---:|
+| Government bills `V (=B)` | `+V` | `-B` | `0` | `0` | `0` |
+| Net foreign assets `NFA` | `0` | `0` | `+NFA` | `-NFA` | `0` |
+
+Net-worth identities:
+- `NW_h = V`
+- `NW_g = -B`
+- `NW_dom_ext = NFA`
+- `NW_row = -NFA`
+- aggregate closure: `NW_h + NW_g + NW_dom_ext + NW_row = 0`.
 
 Declare emissions configuration (first appearance in tutorial).
 
@@ -79,35 +147,35 @@ It sets country/year/table choices for emission-intensity alignment and loading.
 emissions_config <- make_emissions_config()
 ```
 
-### Helper Excerpts (First Introduction)
+### Helper Logic Used in This Step (Detailed, not full code listing)
 
-Step 6 is the first time emissions helpers are used.  
-We keep full implementations in `R/helpers/emissions_load.R` and show key excerpts so participants can follow the alignment logic.
+`normalize_nace_code()` (in `R/helpers/emissions_load.R`) standardizes sector codes before matching:
+1. Convert to uppercase and normalize separators (`-` to `_`, remove dots).
+2. Harmonize variant formats so IO sector codes and AEA codes can be compared one-to-one.
+3. Return cleaned codes used in all later alignment checks.
 
-NACE-code normalization and alignment:
+`align_iot_to_aea()` ensures the IO system and emissions system use the same sector universe:
+1. Get available AEA NACE codes for the selected emissions configuration.
+2. Normalize IO sector codes and keep only sectors present in AEA.
+3. Subset `Z`, `A`, and all sector vectors consistently to the retained sector set.
+4. Recompute derived objects (`L`, `F0`, `Y0`, `G0`) and renormalize demand shares.
+5. Return a reduced but internally consistent calibration object for emissions runs.
 
-```r
-normalize_nace_code <- function(x) {
-  y <- toupper(as.character(x))
-  y <- gsub("-", "_", y)
-  y <- gsub("\\.", "", y)
-  y
-}
+`load_aea_emissions()` builds production-emissions intensities from Eurostat AEA:
+1. Enforce industry-by-industry mode (AEA is industry-coded).
+2. Query AEA with chosen pollutant/year/country and parse values by NACE code.
+3. Align parsed emissions to calibrated sector order.
+4. Fail fast if any required sector is missing emissions data.
+5. Compute intensity `kg CO2 / M EUR` as emissions divided by base output `x0`.
 
-align_iot_to_aea <- function(iot, cfg) {
-  aea_norm <- get_aea_codes(cfg)
-  keep <- normalize_nace_code(iot$sector_codes) %in% aea_norm
-  # keep only sectors that exist in both IO and AEA classifications
-}
-```
+These helpers keep Step 6 simulation logic clean: the simulation loop only needs aligned sector outputs and a matched intensity vector.
 
-Intensity construction and aggregation:
+### Algorithm (pseudo-code)
 
-```r
-intensity <- (em_ths_t * 1e6) / pmax(as.numeric(x0), 1e-9)
-co2_kg <- as.numeric(sim_result$x %*% intensity_vector)
-CO2_Mt <- co2_kg / 1e9
-```
+1. Load and align IO sectors with AEA emissions classifications.
+2. Run macro-IO simulation while storing sector outputs each year.
+3. Multiply sector outputs by intensities to compute production emissions.
+4. Compare baseline/transition and optional intensity-decline cases.
 
 Define Step 6 simulation wrapper with stored sector output.
 
@@ -201,7 +269,7 @@ Build baseline and transition-ready calibration once.
 iot_emis <- download_or_load_iot(emissions_config)
 if (isTRUE(emissions_config$enforce_co2_consistency)) iot_emis <- align_iot_to_aea(iot_emis, emissions_config)
 wealth_emis <- load_wealth_init(emissions_config)
-calib5 <- calibrate_sim_iot_row(iot_emis, wealth_emis)
+calib5 <- build_sim_iot_row_from_data(iot_emis, wealth_emis)
 aea_intensity <- load_aea_emissions(emissions_config, iot_emis$sector_codes, iot_emis$x0)
 ```
 
@@ -235,6 +303,32 @@ ggplot2::ggplot(step6_compare, ggplot2::aes(year, CO2_Mt, color = scenario)) +
   ggplot2::theme_minimal()
 ```
 
+Decompose final-year change into activity and structural components (intensity held fixed).
+
+```{r step6_decomposition}
+x_base <- step6_baseline_sim$x[nrow(step6_baseline_sim$x), ]
+x_trans <- step6_transition_sim$x[nrow(step6_transition_sim$x), ]
+coefs <- setNames(aea_intensity$intensity_kg_per_meur, aea_intensity$sector_code)
+idx <- match(iot_emis$sector_codes, names(coefs))
+s_vec <- coefs[idx]
+s_vec[!is.finite(s_vec)] <- 0
+co2_base <- sum(s_vec * x_base)
+co2_trans <- sum(s_vec * x_trans)
+scale <- sum(x_trans) / pmax(sum(x_base), 1e-9)
+x_activity_only <- x_base * scale
+co2_activity_only <- sum(s_vec * x_activity_only)
+activity_effect <- co2_activity_only - co2_base
+structure_effect <- co2_trans - co2_activity_only
+data.frame(component = c('activity_effect_kg', 'structure_effect_kg', 'total_change_kg'),
+           value = c(activity_effect, structure_effect, co2_trans - co2_base))
+```
+
+### Insight (Step 6 core)
+
+- Transition can change emissions through output scale and composition even before changing intensities.
+- Reporting decomposition avoids confusing structural change with exogenous decarbonization assumptions.
+
+
 Optional play: sensitivity to intensity decline.
 
 Apply an exogenous decline factor to intensities.
@@ -252,6 +346,17 @@ ggplot2::ggplot(step6_play, ggplot2::aes(year, CO2_Mt)) +
   ggplot2::labs(title = "Step 6 Optional: with intensity decline", y = "Mt CO2") +
   ggplot2::theme_minimal()
 ```
+
+
+### Insight (Step 6 optional intensity play)
+
+- Intensity decline can offset activity-driven emissions growth, but does not remove scale effects automatically.
+- If GDP/output rises strongly, rebound-like patterns can appear despite falling intensity assumptions.
+
+### What can go wrong / interpretation caveat
+
+- Alignment mismatches between IO and AEA classifications can bias intensity estimates if unchecked.
+- This is production accounting only; footprint conclusions require MRIO-style imported-emissions modeling.
 
 ### Consumption-emissions caveat (equations/text only)
 

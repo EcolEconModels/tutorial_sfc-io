@@ -2,7 +2,7 @@
 # Do not edit generated blocks manually unless updating all step usage.
 
 # @first_intro_step: 2
-calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
+build_sim_iot_from_data <- function(iot, wealth_init, tau_y = NULL) {
   tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
   list(
     base_year = iot$base_year,
@@ -23,7 +23,7 @@ calibrate_sim_iot <- function(iot, wealth_init, tau_y = NULL) {
 }
 
 # @first_intro_step: 4
-calibrate_sim_iot_row <- function(iot, wealth_init, tau_y = NULL) {
+build_sim_iot_row_from_data <- function(iot, wealth_init, tau_y = NULL) {
   tau_guess <- if (is.null(tau_y)) min(max(iot$G0 / pmax(iot$Y0, 1), 0.1), 0.5) else tau_y
   list(
     base_year = iot$base_year,

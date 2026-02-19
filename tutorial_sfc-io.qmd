@@ -16,7 +16,7 @@ This repository now uses **standalone step tutorials**.
 ## Answer Tutorials
 
 1. [Step 1: SIM](steps/step01_sim.qmd)
-2. [Step 2: SIM + IOT Baseline Fit](steps/step02_sim_iot_fit.qmd)
+2. [Step 2: SIM + IOT Baseline Calibration](steps/step02_sim_iot_calibration.qmd)
 3. [Step 3: Endogenous Transition](steps/step03_endogenous_transition.qmd)
 4. [Step 4: RoW-lite](steps/step04_row_lite.qmd)
 5. [Step 5: Exogenous Transition](steps/step05_exogenous_transition.qmd)
@@ -33,7 +33,7 @@ Rscript build_tutorial.R --generate-question-steps
 Generated files:
 
 1. `steps/step01_sim-question.qmd`
-2. `steps/step02_sim_iot_fit-question.qmd`
+2. `steps/step02_sim_iot_calibration-question.qmd`
 3. `steps/step03_endogenous_transition-question.qmd`
 4. `steps/step04_row_lite-question.qmd`
 5. `steps/step05_exogenous_transition-question.qmd`

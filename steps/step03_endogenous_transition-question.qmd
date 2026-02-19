@@ -29,7 +29,8 @@ if (length(missing_packages) > 0) {
 ### Dependency Context
 
 This step is standalone: it reuses Step 2 data/calibration helpers.
-Endogenous transition dynamics are defined here (not in helpers).
+Economically, that means only one mechanism is newly added here: endogenous composition change.
+Algorithmically, this chunk loads data/parsing/calibration functions only; transition dynamics remain visible in this step file.
 
 ```{r source_helpers}
 helper_dir <- if (dir.exists('R/helpers')) 'R/helpers' else '../R/helpers'
@@ -40,38 +41,133 @@ source(file.path(helper_dir, 'config_wealth.R'))
 source(file.path(helper_dir, 'calibration.R'))
 ```
 
+
+### Function and Variable Location Map
+
+This step reuses Step-2 helpers and defines the transition dynamics locally.
+
+Helper functions (file paths):
+- `make_core_config()`, `load_wealth_init()` in `R/helpers/config_wealth.R`.
+- `download_or_load_iot()`, `find_energy_indices()` in `R/helpers/iot_load.R`.
+- `build_sim_iot_from_data()` in `R/helpers/calibration.R`.
+
+Local functions in this step file:
+- Standalone baseline helper `simulate_sim_iot_baseline()` is defined in hidden chunk `step3_bootstrap_from_step2`.
+- Main transition simulator `simulate_sim_iot_endogenous_transition()` is defined in chunk `step3_functions_endogenous_transition`.
+
+Where key variables are set in this step:
+- `core_config` is printed/checked in `step3_run_config`.
+- Rebuilt fitted object `calib3` and baseline path `step2_baseline` are created in `step3_bootstrap_from_step2`.
+- Transition anchor sector mapping is printed in `step3_transition_sector_mapping`.
+- Core play variable `transition_speed_play` is set in `step3_play_core_transition_speed`.
+- Optional play variable `transition_signal_weight_play` is set in `step3_play_optional_signal`.
+
 ## Step 3: Endogenous Transition
 
 ### Objective
 
-Start from the fitted Step 2 baseline model and activate endogenous energy reallocation to study transition effects.
+Activate endogenous brown-to-green demand-share reallocation on top of the Step 2 calibrated baseline and compare macro/sector outcomes.
+
+### Why this step matters
+
+Participants learn the difference between changing model structure (endogenous transition mechanism) and changing exogenous scenario assumptions. This is central for ecological macro modeling.
+
+### What changed from Step 2
+
+- Added endogenous update rule for demand shares (`beta_C`) across brown and green sectors.
+- Kept all Step 2 accounting identities and production mapping unchanged.
+- Introduced transition speed and signal sensitivity as new behavioral levers.
 
 ### Equations
 
-Step 3 keeps the Step 2 SIM-IOT accounting structure and changes only the demand-share dynamics for energy sectors.
-So TFM and BSM closures remain those of Step 2; the new logic is how `beta_C` evolves over time.
+Economic question: if household demand shares shift endogenously from brown to green sectors, how much do aggregate GDP and sector composition change relative to the no-transition baseline?
 
-Endogenous transition mechanism:
-- Transition signal from previous-year sector outputs: `signal_t = (x_green,t-1 - x_brown,t-1) / sum_i |x_i,t-1|`
-- Endogenous shift size: `shift_t = max(0, transition_speed * (1 + transition_signal_weight * signal_t))`
-- Share reallocation: `beta_C,brown,t = beta_C,brown,t-1 - shift_t`, `beta_C,green,t = beta_C,green,t-1 + shift_t`
-- Normalization/feasibility: reallocation is bounded so shares remain non-negative and sum-preserving.
+Transition equations:
+- Signal from previous outputs: `signal_t = (x_green,t-1 - x_brown,t-1) / sum_i |x_i,t-1|`
+- Share transfer: `shift_t = max(0, transition_speed * (1 + transition_signal_weight * signal_t))`
+- Share updates: `beta_C,brown,t = beta_C,brown,t-1 - shift_t`, `beta_C,green,t = beta_C,green,t-1 + shift_t`
+- Feasibility: transfer is bounded so shares stay non-negative and sum-preserving.
 
-Coupled macro-production loop (unchanged from Step 2):
+Macro-production block (unchanged):
 - `f_t = beta_C,t * C_t + beta_G * G_t + I`
 - `x_t = L f_t`, `Y_t = sum_i(v_i * x_i,t)`
 - `C_t = c_y * YD_t + c_v * V_{t-1}`, `V_t = V_{t-1} + YD_t - C_t`, `B_t = B_{t-1} + (G_t - T_t)`
 
-Economic meaning of symbols:
-- `transition_speed`: baseline annual pace of brown-to-green reallocation.
-- `transition_signal_weight`: amplifies or dampens reallocation based on prior output gap between green and brown sectors.
-- `beta_C,t`: time-varying household demand composition vector that feeds production through `L`.
-- `x_green`, `x_brown`: selected energy sector outputs used only to generate the transition signal.
+Symbol glossary:
+- `transition_speed`: baseline yearly pace of brown-to-green reallocation.
+- `transition_signal_weight`: amplifies/dampens transfer based on prior output structure.
+- `beta_C,t`: time-varying household demand composition vector.
+- `x_green`, `x_brown`: selected energy-sector outputs used for endogenous signal.
+
+Model status in Step 3:
+- Exogenous: fiscal parameters and baseline assumptions inherited from Step 2.
+- Endogenous: transition share updates and all macro/sector paths.
+- Calibrated: still the Step 2 base-year calibration object.
+
+### TFM (Step 3)
+
+| Flow | Households | Government | Production (IOT aggregate) | Sum |
+|---|---:|---:|---:|---:|
+| Income `Y` | `+Y` | `0` | `-Y` | `0` |
+| Taxes `T` | `-T` | `+T` | `0` | `0` |
+| Consumption `C` | `-C` | `0` | `+C` | `0` |
+| Government demand `G` | `0` | `-G` | `+G` | `0` |
+| Change in wealth/debt `Delta_V (= Delta_B)` | `-Delta_V` | `+Delta_B` | `0` | `0` |
+| Column sum | 0 | 0 | 0 | 0 |
+
+From column sums:
+- `Delta_V = YD - C`.
+- `Delta_B = G - T`.
+- `Y = C + G`.
+- `Delta_V = Delta_B`.
+
+Sector-expansion interpretation:
+- This compact table still comes from sector-level production `x = Lf` and aggregation `Y = sum_i v_i x_i`.
+- What changes in Step 3 is demand composition (`beta_C,t`), not the accounting closure.
+
+### BSM (Step 3)
+
+| Stock | Households | Government | Sum |
+|---|---:|---:|---:|
+| Wealth / bills `V (=B)` | `+V` | `-B` | `0` |
+
+Net-worth identities:
+- `NW_h = V`
+- `NW_g = -B`
+- with `V = B`, `NW_h + NW_g = 0`.
+
+### Stability conditions (practical)
+
+- Very high `transition_speed` or extreme `transition_signal_weight` can generate unrealistic jumps in shares.
+- Keep shares bounded and inspect whether sector trajectories remain economically interpretable.
 
 Rebuild Step 2 baseline objects in this standalone step.
 
-For standalone execution, this hidden block recreates the fitted baseline path from Step 2.
-It uses the same baseline dynamics (no transition) and then provides a comparison path for this step.
+Before rebuilding, print the active core configuration so participants can verify country/year/table settings.
+
+Economic reason for this check:
+- Transition outcomes are sensitive to IO structure, so country/year/table choice must be explicit.
+- This printed configuration is the data contract for the full Step 3 run.
+
+```{r step3_run_config}
+core_config <- make_core_config()
+core_config_view <- list(
+  country = core_config$country,
+  year = core_config$year,
+  scope = core_config$scope,
+  table_type = core_config$table_type,
+  iot_dataset = iot_schema(core_config$table_type)$dataset_id,
+  cache_dir = core_config$cache_dir
+)
+core_config_view
+```
+
+For standalone execution, the hidden block below reconstructs Step 2 objects exactly once:
+1. Re-declare the Step 2 baseline simulator (same equations, no transition).
+2. Load IOT and wealth with the same `core_config`.
+3. Rebuild `calib3` with `build_sim_iot_from_data()`.
+4. Simulate `step2_baseline` so Step 3 comparison is always available.
+
 ```{r step3_bootstrap_from_step2, include=FALSE}
 simulate_sim_iot_baseline <- function(calib,
                                       T = 20,
@@ -117,18 +213,70 @@ simulate_sim_iot_baseline <- function(calib,
   out
 }
 
-core_config <- make_core_config()
+if (!exists("core_config", inherits = FALSE)) core_config <- make_core_config()
 iot <- download_or_load_iot(core_config)
 wealth_init <- load_wealth_init(core_config)
-calib3 <- calibrate_sim_iot(iot, wealth_init)
+calib3 <- build_sim_iot_from_data(iot, wealth_init)
 step2_baseline <- simulate_sim_iot_baseline(calib3, T = 20)
 ```
 
+### Algorithm (pseudo-code)
+
+1. Recreate Step 2 baseline calibration and no-transition path.
+2. Initialize demand shares and previous-year sector output.
+3. Each year: compute transition signal, update shares with bounds, run macro-IO recursion.
+4. Store both macro indicators and brown/green share series for comparison.
+
 Define Step 3 endogenous transition dynamics.
 
-This is the new Step 3 algorithm: it adds endogenous brown/green share updates to the Step 2 macro-IO loop.
-Everything else stays the same as baseline, so transition effects are isolated cleanly.
-```{r step3_functions_endogenous_transition}
+Local equations implemented in the next code block:
+- `signal_t = (x_green,t-1 - x_brown,t-1) / sum_i |x_i,t-1|`
+- `shift_t = max(0, transition_speed * (1 + transition_signal_weight * signal_t))`
+- `shift_t <= beta_C,brown,t-1` (bounded transfer constraint)
+- `beta_C,brown,t = beta_C,brown,t-1 - shift_t`, `beta_C,green,t = beta_C,green,t-1 + shift_t`
+- `f_t = beta_C,t * C_t + beta_G * G_t + I`, `x_t = L f_t`, then usual SFC updates for `Y, T, V, B`
+
+Code-local symbol reminders:
+- `transition_speed`: baseline yearly transfer intensity.
+- `transition_signal_weight`: amplification/damping of transfer through previous output structure.
+- `x_prev`: previous-year sector output vector used to build `signal_t`.
+
+Detailed walkthrough of the endogenous algorithm:
+1. Initialize with Step 2 calibration and baseline sector output anchor `x_prev`.
+2. At each period, compute a transition signal from previous brown vs green output.
+3. Convert that signal into a bounded share transfer `shift` from brown to green demand share.
+4. Recompute macro reduced-form terms (`k`, `b`) with the updated demand-share vector.
+5. Solve `C_t`, map to sector output, aggregate to GDP, and update stocks (`V`, `B`) exactly as in Step 2.
+6. Store brown and green shares each period so structural change can be visualized explicitly.
+
+Why this design is useful:
+- Only one mechanism is added relative to Step 2 (share dynamics), so causal interpretation is clean.
+- All accounting identities remain the same, reducing ambiguity about what drives differences.
+
+```
+Transition anchor sectors used in this step (where `idx_brown` and `idx_green` come from).
+
+These indices are detected by `find_energy_indices()` during calibration, then used here for endogenous share transfer.
+Detection rule in helpers:
+- brown index = first sector code matching `(^|_)C19` (coke/refined petroleum products)
+- green index = first sector code matching `(^|_)D35|(^|_)D` (electricity/gas/steam aggregate)
+- if either is missing, the model stops with an explicit error
+
+Print the actual sector mapping for the current dataset/configuration.
+```{r step3_transition_sector_mapping}
+idx_b <- calib3$idx$idx_brown
+idx_g <- calib3$idx$idx_green
+transition_sector_map <- data.frame(
+  role = c('brown', 'green'),
+  index = c(idx_b, idx_g),
+  sector_code = calib3$sector_codes[c(idx_b, idx_g)],
+  sector_label = calib3$sector_labels[c(idx_b, idx_g)],
+  stringsAsFactors = FALSE
+)
+transition_sector_map
+```
+
+{r step3_functions_endogenous_transition}
 simulate_sim_iot_endogenous_transition <- function(calib,
                                                    T = 20,
                                                    c_y = 0.82,
@@ -193,27 +341,63 @@ simulate_sim_iot_endogenous_transition <- function(calib,
 
 Core play: transition speed.
 
-Increase endogenous transition speed from zero.
-Rerun the model and compare GDP against Step 2 no-transition baseline.
+This play changes only `transition_speed`, holding all other coefficients fixed.
+Economic meaning: you are changing the pace of endogenous demand reallocation, not fiscal stance or technology.
+After running, compare the new path against Step 2 baseline to isolate structural-composition effects on GDP and shares.
+
 ```{r step3_play_core_transition_speed}
 transition_speed_play <- 0.001  # TODO [core:step3_speed] Change endogenous transition speed and compare GDP/energy-share paths Hint: Try 0.001 then 0.004
 step3_play <- simulate_sim_iot_endogenous_transition(calib3, T = 20, transition_speed = transition_speed_play)
 ```
 
+Print quick structural diagnostics for the transition run.
+
+Purpose of diagnostics:
+- Feasibility check: shares should stay in sensible ranges.
+- Direction check: brown share should typically fall and green share rise if transition is active.
+- Macro check: final GDP level provides quick context before plotting full paths.
+
+```{r step3_transition_diagnostics}
+share_diag <- data.frame(
+  metric = c('min_betaC_brown', 'max_betaC_brown', 'min_betaC_green', 'max_betaC_green', 'final_GDP'),
+  value = c(
+    min(step3_play$betaC_brown, na.rm = TRUE),
+    max(step3_play$betaC_brown, na.rm = TRUE),
+    min(step3_play$betaC_green, na.rm = TRUE),
+    max(step3_play$betaC_green, na.rm = TRUE),
+    tail(step3_play$GDP, 1)
+  )
+)
+share_diag
+```
+
 Plot Step 3 core comparison.
 
-Overlay baseline and transition GDP paths to isolate the endogenous transition effect.
-```{r step3_plot_core, fig.height=4, fig.width=7}
+How to interpret panel 1 (GDP): difference from baseline shows macro consequence of composition reallocation.
+How to interpret panel 2 (shares): confirms whether and how fast the structural shift actually occurred.
+Reading both together avoids misinterpretation: GDP can move even with modest share shifts if affected sectors have high multiplier/value-added content.
+
+```{r step3_plot_core, fig.height=4.5, fig.width=9}
+par(mfrow = c(1, 2))
 plot(step2_baseline$year, step2_baseline$GDP, type = "l", lwd = 2, col = "steelblue",
-     xlab = "year", ylab = "GDP", main = "Step 3 Core Play: transition speed")
+     xlab = "year", ylab = "GDP", main = "Step 3 Core: GDP")
 lines(step3_play$year, step3_play$GDP, lwd = 2, col = "firebrick")
-legend("topleft", legend = c("baseline (no transition)", paste0("play: ", transition_speed_play)),
+legend("topleft", legend = c("baseline", paste0("transition speed=", transition_speed_play)),
        col = c("steelblue", "firebrick"), lty = 1, bty = "n")
+plot(step3_play$year, step3_play$betaC_brown, type = "l", lwd = 2, col = "firebrick",
+     xlab = "year", ylab = "share", main = "Step 3 Core: demand shares")
+lines(step3_play$year, step3_play$betaC_green, lwd = 2, col = "darkgreen")
+legend("right", legend = c("brown share", "green share"),
+       col = c("firebrick", "darkgreen"), lty = 1, bty = "n")
+par(mfrow = c(1, 1))
 ```
 
 Optional play: transition asymmetry / signal sensitivity.
 
-Change the signal weight in the endogenous rule and compare brown/green share dynamics.
+This play changes `transition_signal_weight`, which governs how strongly current structure feeds back into next period transfer.
+Higher values make the transition more path-dependent: successful green expansion can accelerate further shifts.
+Compare dashed vs solid lines to see whether feedback amplifies or dampens structural change.
+
 ```{r step3_play_optional_signal}
 transition_signal_weight_play <- 0.5  # TODO [optional:step3_signal] Change transition signal sensitivity and compare brown/green share dynamics Hint: Try 0.5, 1.0, 1.8
 step3_opt <- simulate_sim_iot_endogenous_transition(calib3, T = 20, transition_speed = transition_speed_play, transition_signal_weight = transition_signal_weight_play)
@@ -226,6 +410,17 @@ lines(step3_opt$year, step3_opt$betaC_green, lwd = 2, col = "darkgreen", lty = 2
 legend("right", legend = c("brown base", "brown play", "green base", "green play"),
        col = c("firebrick", "firebrick", "darkgreen", "darkgreen"), lty = c(1, 2, 1, 2), bty = "n")
 ```
+
+
+### Insight (Step 3)
+
+- Endogenous transition can reallocate sectoral demand even when aggregate fiscal settings are unchanged.
+- GDP response depends on the IO structure and value-added content of sectors gaining/losing demand shares.
+
+### What can go wrong / interpretation caveat
+
+- If transition parameters are too aggressive, share paths may be mechanically feasible but economically implausible.
+- This mechanism captures demand-side structural change only; technology and price dynamics are still fixed.
 
 ### Interpretation
 

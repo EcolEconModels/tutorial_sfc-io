@@ -177,7 +177,7 @@ The following decisions are additive and do not remove prior scope/content decis
 
 1. Tutorial structure is six standalone step tutorials:
    - `steps/step01_sim.qmd`
-   - `steps/step02_sim_iot_fit.qmd`
+   - `steps/step02_sim_iot_calibration.qmd`
    - `steps/step03_endogenous_transition.qmd`
    - `steps/step04_row_lite.qmd`
    - `steps/step05_exogenous_transition.qmd`
@@ -195,7 +195,7 @@ The following decisions are additive and do not remove prior scope/content decis
 4. Step excerpt policy:
    - A step shows only code newly introduced for that step.
    - If a helper was introduced earlier, later steps source it and reference the earlier step.
-   - When helpers are first introduced, each step must include short explanatory excerpts of the helper logic used in that step.
+   - When helpers are first introduced, each step must include a clear prose explanation of helper logic (not large verbatim code excerpts).
 
 5. Dynamics ownership policy (locked):
    - No core simulation/dynamics loops in shared helper files.
