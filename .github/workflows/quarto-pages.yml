@@ -27,6 +27,9 @@ jobs:
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
+      - name: Ensure data cache directory exists
+        run: mkdir -p data
+
       - name: Setup R dependencies (cached, CI only)
         uses: r-lib/actions/setup-r-dependencies@v2
         with:

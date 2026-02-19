@@ -144,7 +144,7 @@ Investment treatment in this tutorial (equation-level clarification):
 
 | Stock | Households | Government | Production (IOT aggregate) | Sum |
 |---|---:|---:|---:|---:|
-| Wealth / bills `V (=B)` | `+V` | `-B` | `0` | `0` |
+| Wealth/debt stock `V (=B)` | `+V` | `-B` | `0` | `0` |
 | Net worth `NW` | `+NW_h` | `+NW_g` | `+NW_p` | `0` |
 
 Net-worth identities (column-sum closure):

@@ -131,7 +131,7 @@ Aggregate-to-sector interpretation:
 
 | Stock | Households | Government | Production | RoW | Sum |
 |---|---:|---:|---:|---:|---:|
-| Wealth / bills `V (=B)` | `+V` | `-B` | `0` | `0` | `0` |
+| Wealth/debt stock `V (=B)` | `+V` | `-B` | `0` | `0` | `0` |
 | Net foreign assets `NFA` | `0` | `0` | `+NFA` | `-NFA` | `0` |
 | Net worth `NW` | `+NW_h` | `+NW_g` | `+NW_p` | `+NW_row` | `0` |
 
